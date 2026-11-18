@@ -1,0 +1,10 @@
+/*
+Theme Name: Tyler CMS Base Site
+Description: Block theme for Tyler CMS Base Site on the CMS COE platform. Brand tokens live in theme.json and are bridged to Tyler Forge theme variables. Presentation only: content types, blocks, and roles live in plugins.
+Version: 0.1.0
+Requires at least: 7.0
+Requires PHP: 8.3
+Author: CMS COE
+License: GPL-2.0-or-later
+Text Domain: tyler-cms-theme
+*/

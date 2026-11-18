@@ -1,0 +1,13 @@
+{
+  "theme": "tyler-cms-theme",
+  "families": {
+    "body": {
+      "family": "Public Sans",
+      "package": "@fontsource-variable/public-sans"
+    },
+    "heading": {
+      "family": "Merriweather Sans",
+      "package": "@fontsource-variable/merriweather-sans"
+    }
+  }
+}

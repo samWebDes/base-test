@@ -1,0 +1,4 @@
+.cmscoe-forge-card { height: 100%; }
+.cmscoe-forge-card forge-card { height: 100%; }
+.cmscoe-forge-card__body > * + * { margin-block-start: var(--wp--preset--spacing--30, 1rem); }
+.cmscoe-forge-card__body img { max-width: 100%; height: auto; display: block; }

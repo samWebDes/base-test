@@ -1,0 +1,22 @@
+{
+	"$schema": "https://schemas.wp.org/trunk/block.json",
+	"apiVersion": 3,
+	"name": "cmscoe/forge-button",
+	"version": "0.2.0",
+	"title": "Forge Button",
+	"category": "cmscoe-forge",
+	"icon": "button",
+	"description": "A call-to-action link rendered with the Tyler Forge button component.",
+	"keywords": [ "button", "link", "cta", "forge" ],
+	"textdomain": "cmscoe-forge",
+	"attributes": {
+		"text": { "type": "string", "default": "" },
+		"url": { "type": "string", "default": "" },
+		"variant": { "type": "string", "enum": [ "raised", "outlined", "tonal" ], "default": "raised" },
+		"opensInNewTab": { "type": "boolean", "default": false }
+	},
+	"supports": { "html": false, "reusable": false, "align": false },
+	"editorScript": "file:./index.js",
+	"script": "cmscoe-forge-runtime",
+	"render": "file:./render.php"
+}

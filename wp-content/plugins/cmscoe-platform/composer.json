@@ -1,0 +1,14 @@
+{
+	"name": "cmscoe/platform",
+	"description": "Shared CMS COE platform rules and content blocks for WordPress.",
+	"type": "wordpress-plugin",
+	"version": "0.4.0",
+	"license": "GPL-2.0-or-later",
+	"require": {
+		"php": ">=8.3",
+		"composer/installers": "^2.3"
+	},
+	"extra": {
+		"installer-name": "cmscoe-platform"
+	}
+}

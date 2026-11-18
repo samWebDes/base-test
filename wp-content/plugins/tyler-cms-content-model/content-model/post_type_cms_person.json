@@ -1,0 +1,70 @@
+{
+    "key": "post_type_cms_person",
+    "title": "People",
+    "menu_order": 0,
+    "active": true,
+    "post_type": "cms_person",
+    "advanced_configuration": false,
+    "import_source": "",
+    "import_date": "",
+    "allow_ai_access": false,
+    "ai_description": "",
+    "labels": {
+        "name": "People",
+        "singular_name": "Person",
+        "menu_name": "People",
+        "all_items": "All People",
+        "add_new_item": "Add New Person",
+        "edit_item": "Edit Person",
+        "view_item": "View Person",
+        "search_items": "Search People",
+        "not_found": "No People found"
+    },
+    "description": "A staff directory or leadership entry. Publish only work contact details.",
+    "public": true,
+    "hierarchical": false,
+    "exclude_from_search": false,
+    "publicly_queryable": true,
+    "show_ui": true,
+    "show_in_menu": true,
+    "admin_menu_parent": "",
+    "show_in_admin_bar": true,
+    "show_in_nav_menus": true,
+    "show_in_rest": true,
+    "rest_base": "",
+    "rest_namespace": "wp\/v2",
+    "rest_controller_class": "WP_REST_Posts_Controller",
+    "menu_position": null,
+    "menu_icon": {
+        "type": "dashicons",
+        "value": "dashicons-id"
+    },
+    "rename_capabilities": true,
+    "singular_capability_name": "cms_person",
+    "plural_capability_name": "cms_persons",
+    "supports": [
+        "title",
+        "editor",
+        "thumbnail",
+        "revisions"
+    ],
+    "taxonomies": [
+        "cms_division"
+    ],
+    "has_archive": true,
+    "has_archive_slug": "people",
+    "rewrite": {
+        "permalink_rewrite": "custom_permalink",
+        "slug": "people",
+        "feeds": true,
+        "pages": true,
+        "with_front": false
+    },
+    "query_var": "post_type_key",
+    "query_var_name": "",
+    "can_export": true,
+    "delete_with_user": false,
+    "register_meta_box_cb": "",
+    "enter_title_here": "",
+    "modified": 1794961698
+}

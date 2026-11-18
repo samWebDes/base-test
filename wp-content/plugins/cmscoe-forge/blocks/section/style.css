@@ -1,0 +1,4 @@
+.cmscoe-section.has-background, .cmscoe-section--image { padding-block: var(--wp--preset--spacing--60, 3rem); }
+.cmscoe-section--image { position: relative; color: #fff; background-size: cover; background-position: center; box-shadow: inset 0 0 0 100vmax rgb(0 0 0 / 0.62); }
+.cmscoe-section--image a:not(.wp-element-button) { color: #fff; }
+@media (forced-colors: active) { .cmscoe-section--image { background-image: none !important; } }

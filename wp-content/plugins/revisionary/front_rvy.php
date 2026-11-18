@@ -1,0 +1,955 @@
+<?php
+defined('ABSPATH') || exit;
+
+class RevisionaryFront {
+
+    private $preview_parents = [];
+    private $preview_inheritance_busy = false;
+    private $public_preview_ids = [];
+
+	function __construct() {
+		global $revisionary;
+
+		// This filter may be required in some configurations, but problematic in others
+		if (!defined('PP_REVISIONS_NO_PAGE_ON_FRONT_FILTER')) {
+			add_filter("option_page_on_front", [$this, 'fltOptionPageOnFront']);
+		}
+
+		add_action('parse_query', [$this, 'actSetQueriedObject'], 20);
+		add_action('pre_get_posts', [$this, 'configureNativeRevisionPreview'], 99);
+		add_action('pre_get_posts', [$this, 'configureWorkflowRevisionPreview'], 99);
+		add_action('parse_query', [$this, 'actFlagHomeRevision'], 20);
+
+		if (!defined('ET_BUILDER_VERSION') || defined('REVISIONARY_DIVI_HOME_PREVIEW_FILTER')) {
+			add_filter('posts_clauses_request', [$this, 'fltHomePreviewRequest'], 99, 3);
+		}
+
+		add_filter('body_class', [$this, 'fltBodyClass'], 20, 2);
+
+		add_filter('acf/load_value', [$this, 'fltACFLoadValue'], 10, 3);
+        add_filter('get_object_terms', [$this, 'inheritPreviewTerms'], 10, 4);
+		add_filter('get_post_metadata', [$this, 'fltGetPostMeta'], 10, 5);
+		add_action('revisionary_preview_load', [$this, 'setPreviewTemplateContext'], 10, 2);
+
+		if ( ! defined('RVY_CONTENT_ROLES') || !$revisionary->content_roles->is_direct_file_access() ) {
+			add_filter('posts_request', [$this, 'flt_view_revision'] );
+			add_action('template_redirect', [$this, 'act_template_redirect'], 5 );
+		}
+
+		if (defined('PUBLISHPRESS_MULTIPLE_AUTHORS_VERSION')) {
+			add_filter('the_author', [$this, 'fltAuthor'], 20);
+		}
+
+		if (!empty($_REQUEST['_ppp'])) {									//phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			add_action('template_redirect', [$this, 'actRevisionPreviewRedirect'], 1);
+
+			// Public Post Preview fires this only after verifying its link nonce for an opted-in post.
+			add_action('ppp_show_public_preview', [$this, 'actPublicPostPreview']);
+			add_filter('revisionary_can_read_revision_and_parent', [$this, 'fltPublicPostPreviewAccess'], 10, 3);
+		}
+
+
+		remove_action( 'init', 'register_block_core_post_comments' );
+
+		do_action('revisionary_front_init');
+	}
+
+    /** Admit an authorized singular preview without granting its edit meta cap. */
+    public function configureWorkflowRevisionPreview($query) {
+        if (is_admin() || !is_user_logged_in() || !$query->is_main_query()
+            || !$query->is_singular() || !empty($_POST) // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Reject form submissions; this callback performs no form action.
+            || (defined('REST_REQUEST') && REST_REQUEST)
+            || (defined('DOING_AJAX') && DOING_AJAX)
+            || !isset($_SERVER['REQUEST_METHOD'])
+            || 'GET' !== strtoupper(sanitize_text_field(wp_unslash($_SERVER['REQUEST_METHOD'])))) {
+            return;
+        }
+        $id = (int) ($query->get('page_id') ?: $query->get('p'));
+        $revision = $id ? get_post($id) : null;
+        if (!$revision || !rvy_in_revision_workflow($revision)
+            || 'future-revision' !== $revision->post_mime_type
+            || in_array($revision->post_status, ['publish', 'private', 'future', 'trash', 'inherit'], true)
+            || !rvy_can_read_revision_and_parent($id)) {
+            return;
+        }
+        // WP_Query accepts an explicitly requested status without its edit_post
+        // preview gate. This exact main query has already passed read checks.
+        $query->set('post_status', $revision->post_status);
+        $query->is_preview = true;
+    }
+	function fltHomePreviewRequest($clauses, $_wp_query = false, $args = []) {
+		global $wpdb, $wp_query;
+
+		$preview_page_id = (!empty($_REQUEST['page__id'])) ? intval($_REQUEST['page__id']) : 0;				// phpcs:ignore WordPress.Security.NonceVerification.Recommended
+
+		if (!$preview_page_id || empty($wp_query) || empty($wp_query->query_vars) || empty($wp_query->query_vars['p'])) {
+			return $clauses;
+		}
+
+		$front_page_id = intval($wp_query->query_vars['p']);
+
+		if (rvy_post_id($preview_page_id) == $front_page_id) {
+			$clauses['where'] = str_replace("$wpdb->posts.ID = $front_page_id", "$wpdb->posts.ID = $preview_page_id", $clauses['where']);
+			$clauses['where'] = str_replace("post_id = $front_page_id", "post_id = $preview_page_id", $clauses['where']);
+
+			$clauses['join'] = str_replace("$wpdb->posts.ID = $front_page_id", "$wpdb->posts.ID = $preview_page_id", $clauses['join']);
+			$clauses['join'] = str_replace("post_id = $front_page_id", "post_id = $preview_page_id", $clauses['join']);
+		}
+
+		return $clauses;
+	}
+
+	function setPreviewTemplateContext($revision_id, $published_post_id) {
+		global $wp_query;
+		$revision = get_post($revision_id);
+		$published = get_post($published_post_id);
+		if (!$revision || !$published || ($revision_id == $published_post_id)
+			|| !rvy_can_read_revision_and_parent($revision_id)) {
+			return;
+		}
+        // Inheritance is enabled only by an authorized preview initialization.
+        $this->preview_parents[(int) $revision_id] = (int) $published_post_id;
+        if (!$wp_query) {
+            return;
+        }
+		// Keep the revision ID/content, but select the original post type's
+		// template hierarchy. Do not alter the stored revision or loop object.
+		$queried = clone $revision;
+		$queried->post_type = $published->post_type;
+		$queried->post_name = $published->post_name;
+		if ('page' === $published->post_type) {
+			add_filter('page_template_hierarchy', static function ($templates) use ($revision_id, $published_post_id) {
+				return array_map(static function ($template) use ($revision_id, $published_post_id) {
+					return ('page-' . $revision_id . '.php' === $template) ? 'page-' . $published_post_id . '.php' : $template;
+				}, $templates);
+			});
+		}
+		$wp_query->queried_object = $queried;
+		$wp_query->queried_object_id = $revision_id;
+		$wp_query->is_page = ('page' === $published->post_type);
+		$wp_query->is_single = !$wp_query->is_page;
+		$wp_query->is_singular = true;
+	}
+
+    private function previewParentId($revision_id) {
+        $revision_id = (int) $revision_id;
+        if (empty($this->preview_parents[$revision_id])
+            || $this->preview_parents[$revision_id] !== (int) rvy_post_id($revision_id)
+            || !rvy_can_read_revision_and_parent($revision_id)) {
+            return 0;
+        }
+        $parent_id = $this->preview_parents[$revision_id];
+        // Do not follow malformed or cyclic revision-to-revision associations.
+        return $parent_id !== $revision_id && get_post($parent_id)
+            && !rvy_in_revision_workflow($parent_id) && !wp_is_post_revision($parent_id)
+            ? $parent_id : 0;
+    }
+
+    private function previewMetaKeyAllowed($key) {
+        if (!$key || defined('REVISIONARY_PREVIEW_NO_META_MIRROR') || class_exists('CWS_PageLinksTo')) {
+            return false;
+        }
+        foreach (revisionary_unrevisioned_postmeta() as $excluded) {
+            $pattern = '/^' . str_replace('\\*', '.*', preg_quote($excluded, '/')) . '$/D';
+            if (preg_match($pattern, $key)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    function inheritPreviewTerms($terms, $object_ids, $taxonomies, $args) {
+        if ($this->preview_inheritance_busy || defined('REVISIONARY_PREVIEW_NO_TERM_MIRROR')
+            || is_wp_error($terms) || $terms || count((array) $object_ids) !== 1
+            || count((array) $taxonomies) !== 1) {
+            return $terms;
+        }
+        $object_ids = (array) $object_ids;
+        $taxonomies = (array) $taxonomies;
+        $revision_id = (int) reset($object_ids);
+        $taxonomy = reset($taxonomies);
+        if (in_array($taxonomy, (array) apply_filters('revisionary_skip_taxonomies', []), true)
+            || ('author' === $taxonomy && defined('REVISIONARY_DISABLE_MA_PREVIEW_CORRECTION'))) {
+            return $terms;
+        }
+        $this->preview_inheritance_busy = true;
+        try {
+            if (!($parent_id = $this->previewParentId($revision_id))) {
+                return $terms;
+            }
+            // An empty constrained query must not override a revision's own terms.
+            $stored = wp_get_object_terms($revision_id, $taxonomies, ['fields' => 'ids', 'number' => 1]);
+            if (is_wp_error($stored) || $stored) {
+                return $terms;
+            }
+            $inherited = wp_get_object_terms($parent_id, $taxonomies, $args);
+            if (is_array($inherited) && 'all_with_object_id' === ($args['fields'] ?? 'all')) {
+                foreach ($inherited as $key => $term) {
+                    if (is_object($term)) {
+                        $inherited[$key] = clone $term;
+                        $inherited[$key]->object_id = $revision_id;
+                    }
+                }
+            }
+            return $inherited;
+        } finally {
+            $this->preview_inheritance_busy = false;
+        }
+    }
+
+    function fltGetPostMeta($meta_val, $object_id, $meta_key, $single, $meta_type) {
+        if ($this->preview_inheritance_busy || null !== $meta_val || 'post' !== $meta_type
+            || !$this->previewMetaKeyAllowed($meta_key)) {
+            return $meta_val;
+        }
+        $this->preview_inheritance_busy = true;
+        try {
+            if (!($parent_id = $this->previewParentId($object_id))
+                || metadata_exists('post', $object_id, $meta_key)) {
+                return $meta_val;
+            }
+            $value = get_post_meta($parent_id, $meta_key, $single);
+            // get_metadata_raw() unwraps array filter results for single reads.
+            return $single ? [$value] : $value;
+        } finally {
+            $this->preview_inheritance_busy = false;
+        }
+    }
+
+    function fltACFLoadValue($value, $post_id, $field) {
+        $key = is_array($field) && isset($field['name']) ? $field['name'] : '';
+        if ($this->preview_inheritance_busy || null !== $value || !is_numeric($post_id)
+            || !function_exists('acf_get_value') || !$this->previewMetaKeyAllowed($key)) {
+            return $value;
+        }
+        $this->preview_inheritance_busy = true;
+        try {
+            if (!($parent_id = $this->previewParentId($post_id))
+                || metadata_exists('post', $post_id, $key)) {
+                return $value;
+            }
+            return acf_get_value($parent_id, $field);
+        } finally {
+            $this->preview_inheritance_busy = false;
+        }
+    }
+
+	function fltOptionPageOnFront($front_page_id) {
+		global $post;
+
+		// extra caution and perf optimization for front end execution
+		if (!empty($post) && is_object($post) && rvy_in_revision_workflow($post) && ($post->comment_count == $front_page_id)) {
+			return $post->ID;
+		}
+
+		return $front_page_id;
+	}
+
+	function fltBodyClass($classes, $css_class) {
+		if ($this->isHomeRevision()) {
+			$classes = array_merge(['home'], $classes);
+			$classes = array_diff($classes, ['blog']);
+		}
+
+		return $classes;
+	}
+
+	function actSetQueriedObject(&$query) {
+		if ($post_id = rvy_detect_post_id()) {
+			if (rvy_in_revision_workflow($post_id) || wp_is_post_revision($post_id)) {
+				$query->queried_object = get_post($post_id);
+				$query->queried_object_id = $post_id;
+			}
+		}
+	}
+
+	function configureNativeRevisionPreview($query) {
+		$preview_arg = defined('RVY_PREVIEW_ARG') ? sanitize_key(constant('RVY_PREVIEW_ARG')) : 'rv_preview';
+		// Only the main, explicitly requested archive preview is eligible.
+		if (!$query->is_main_query() || is_admin()
+		|| empty($_GET[$preview_arg]) || !empty($_REQUEST['preview_id'])) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			return;
+		}
+		$revision_id = (int) ($query->get('page_id') ?: $query->get('p'));
+		$revision = get_post($revision_id);
+		if (!$revision || 'revision' !== $revision->post_type || 'inherit' !== $revision->post_status) {
+			return;
+		}
+
+		$parent = get_post($revision->post_parent);
+		$authorized = $parent && is_user_logged_in()
+			&& (rvy_can_read_post($revision_id) || current_user_can('edit_post', $parent->ID));
+		if (!$authorized) {
+			// Prevent an explicit status query from exposing archives to guests.
+			$query->set('p', 0);
+			$query->set('page_id', 0);
+			$query->set('attachment_id', 0);
+			$query->set('post__in', [0]);
+			return;
+		}
+
+		// An explicit, authorized status query avoids WordPress's later protected
+		// status edit check, and works even when SQL/result filters are suppressed.
+		$query->set('post_type', 'revision');
+		$query->set('post_status', 'inherit');
+		$query->set('p', $revision_id);
+		$query->set('page_id', 0);
+		$query->set('attachment_id', 0);
+		foreach (['name', 'pagename', 'attachment'] as $key) {
+			$query->set($key, '');
+		}
+		foreach (['year', 'monthnum', 'day'] as $key) {
+			$query->set($key, 0);
+		}
+		// Zero is a valid time constraint (midnight), not an unset value.
+		foreach (['hour', 'minute', 'second'] as $key) {
+			$query->set($key, '');
+		}
+	}
+
+    function actFlagHomeRevision(&$query) {
+		if ($this->isHomeRevision() 
+		&& (
+			!defined('ELEMENTOR_VERSION') 
+			|| (
+				(empty($_REQUEST['action']) || ('elementor' != $_REQUEST['action']))		//phpcs:ignore WordPress.Security.NonceVerification.Recommended
+				&& empty($_REQUEST['elementor-preview'])									//phpcs:ignore WordPress.Security.NonceVerification.Recommended
+				&& empty($_REQUEST['elementor_ajax'])										//phpcs:ignore WordPress.Security.NonceVerification.Recommended
+				)
+			) 
+		) {
+			if (rvy_get_option('home_preview_set_home_flag')) {
+				$query->is_home = true;
+			}
+
+			$query->is_front_page = true;
+		}
+	}
+
+	private function isHomeRevision() {
+		if ($post_id = rvy_detect_post_id()) {
+			if ($published_post_id = rvy_post_id($post_id)) {
+				if ($published_post_id != $post_id) {
+					if ( ('page' === get_option( 'show_on_front' )) 
+					&& in_array( (int) get_option( 'page_on_front' ), [$published_post_id, $post_id], true )
+					) {
+						return true;
+					}
+				}
+			}
+		}
+
+		return false;
+	}
+
+	public function actRevisionPreviewRedirect() {
+		if (!class_exists('DS_Public_Post_Preview')) {
+			return;
+		}
+
+		if ($_post = get_post(rvy_detect_post_id())) {
+			if (('revision' == $_post->post_type) && ('inherit' == $_post->post_status)) {
+				if ($url = get_permalink(rvy_post_id($_post->ID))) {
+					wp_safe_redirect($url);
+					exit;
+				}
+			}
+		}
+	}
+
+	public function actPublicPostPreview($post_id) {
+		$post_id = (int) $post_id;
+
+		if ($post_id && rvy_in_revision_workflow($post_id)) {
+			$this->public_preview_ids[$post_id] = true;
+		}
+	}
+
+	/**
+	 * A Public Post Preview link verified for this revision grants read access to it,
+	 * including private and unpublished parents supported by the preview workflow.
+	 */
+	public function fltPublicPostPreviewAccess($can_read, $revision_id, $parent_id = 0) {
+		if ($can_read || empty($this->public_preview_ids[(int) $revision_id])) {
+			return $can_read;
+		}
+
+		$parent_id = (int) $parent_id ?: (int) rvy_post_id($revision_id);
+
+		if (!$parent_id || ($parent_id === (int) $revision_id) || rvy_in_revision_workflow($parent_id)) {
+			return $can_read;
+		}
+
+		$parent = get_post($parent_id);
+		$status_obj = $parent ? get_post_status_object($parent->post_status) : null;
+		return $status_obj && 'trash' !== $parent->post_status
+			&& (!empty($status_obj->public) || in_array($parent->post_status, ['private', 'draft', 'pending', 'future'], true))
+			&& is_post_type_viewable($parent->post_type);
+	}
+
+	public function fltAuthor($display_name) {
+		if ($_post = get_post(rvy_detect_post_id())) {
+			if (rvy_in_revision_workflow($_post) || wp_is_post_revision($_post)) {
+				// we only need this workaround when multiple authors were not successfully stored
+				if ($authors = get_multiple_authors($_post->ID, false)) {
+					return $display_name;
+				}
+
+				if ($authors = get_multiple_authors(rvy_post_id($_post->ID), false)) {
+					$author_displays = [];
+					foreach($authors as $author) {
+						$author_displays []= $author->display_name;
+					}
+
+					if (in_array($display_name, $author_displays, true)) {
+						return $display_name;
+					}
+
+					return implode(', ', $author_displays);
+				}
+			}
+		}
+
+		return $display_name;
+	}
+
+	function flt_revision_preview_url($redirect_url, $requested_url) {
+		remove_filter('redirect_canonical', array($this, 'flt_revision_preview_url'), 10, 2);
+		return $requested_url;
+	}
+
+	function flt_view_revision($request) {
+		global $current_user;
+
+		//WP post/page preview passes this arg
+		if ( ! empty( $_GET['preview_id'] ) ) {												//phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			$published_post_id = (int) $_GET['preview_id'];									//phpcs:ignore WordPress.Security.NonceVerification.Recommended
+
+			remove_filter( 'posts_request', array( &$this, 'flt_view_revision' ) ); // no infinite recursion!
+
+			if ( $preview = wp_get_post_autosave($published_post_id, $current_user->ID) )
+				$request = str_replace( "ID = '$published_post_id'", "ID = '$preview->ID'", $request );
+
+			add_filter( 'posts_request', array( &$this, 'flt_view_revision' ) );
+
+		} else {
+			$revision_id = (isset($_REQUEST['page_id'])) ? (int) $_REQUEST['page_id'] : 0;	//phpcs:ignore WordPress.Security.NonceVerification.Recommended
+
+			if (!$revision_id) {
+				$revision_id = rvy_detect_post_id();
+			}
+
+			if (!$revision = wp_get_post_revision($revision_id)) {
+				return $request;
+			}
+
+			// rvy_list_post_revisions passes these args
+			if($revision && ('revision' == $revision->post_type)) {
+				if ($pub_post = get_post($revision->post_parent)) {
+					if ( $type_obj = get_post_type_object( $pub_post->post_type ) ) {
+						if (rvy_can_read_revision_and_parent($revision_id)) {
+							$request = str_replace( "post_type = 'post'", "post_type = 'revision'", $request );
+							$request = str_replace( "post_type = '{$pub_post->post_type}'", "post_type = 'revision'", $request );
+						}
+					}
+				}
+			}
+		}
+
+		return $request;
+	}
+
+	// allows for front-end viewing of a revision by those who can edit the current revision (also needed for post preview by users editing for pending revision)
+	function act_template_redirect() {
+		if ( is_admin() ) {
+			return;
+		}
+
+		if (defined('FL_BUILDER_VERSION') && isset($_REQUEST['fl_builder'])) {				//phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			return;
+		}
+
+		global $wp_query, $revisionary;
+		if ($wp_query->is_404) {
+			if (!empty($_REQUEST['base_post'])) {											//phpcs:ignore WordPress.Security.NonceVerification.Recommended
+				if ($post = get_post(intval($_REQUEST['base_post']))) {						//phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited, WordPress.Security.NonceVerification.Recommended
+					$url = get_permalink((int) $_REQUEST['base_post']);						//phpcs:ignore WordPress.Security.NonceVerification.Recommended
+					wp_safe_redirect($url);
+					exit;
+				}
+			}
+		}
+
+		if (!empty($_REQUEST['page__id'])) {												//phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			$revision_id = (int) $_REQUEST['page__id'];										//phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		} elseif (!empty($_REQUEST['page_id'])) {											//phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			$revision_id = (int) $_REQUEST['page_id'];										//phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		} elseif (!empty($_REQUEST['p'])) {													//phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			$revision_id = (int) $_REQUEST['p'];											//phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		} else {
+			if (!empty($post)) {
+				$revision_id = $post->ID;
+			} else {
+				$revision_id = 0;
+			}
+		}
+
+		if ($wp_query->is_404 && !empty($revision_id) && (in_array(get_post_field('post_status', $revision_id), ['future', 'publish'], true) || defined('REVISIONARY_FORCE_PUBLICATION_REDIRECT'))) {
+			// Work around timing issue when scheduled revision publication is underway
+			if ($published_id = get_post_meta($revision_id, '_rvy_base_post_id', true)) {
+				if ($post = get_post($published_id)) {										// phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited)
+					if ($type_obj = get_post_type_object($post->post_type)) {
+						$redirect = ($type_obj && empty($type_obj->public)) ? rvy_admin_url("post.php?action=edit&post=$post->ID") : add_query_arg('mark_current_revision', 1, get_permalink($post->ID)); // published URL
+						wp_safe_redirect($redirect);
+						exit;	
+					}
+				}
+			}
+		}
+
+        if ((rvy_in_revision_workflow($revision_id) || wp_is_post_revision($revision_id)) && !rvy_can_read_revision_and_parent($revision_id)) {
+            wp_die(esc_html__('You are not allowed to view this revision.', 'revisionary'), '', ['response' => 403]);
+        }
+
+		do_action('revisionary_front', $revision_id);
+
+		global $wpdb;
+
+		if (empty($_REQUEST['mark_current_revision']) && empty($_REQUEST['rvy_approval'])) {				//phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			
+			if (!$post = $wpdb->get_row(								// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.WP.GlobalVariablesOverride.Prohibited
+				$wpdb->prepare(
+					"SELECT * FROM $wpdb->posts WHERE ID = %d",
+					$revision_id
+				))
+			) {
+				if (!$post = wp_get_post_revision($revision_id)) {		// phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited
+					return;
+				}
+			}
+		}
+	
+		if (empty($post) || !empty($_REQUEST['mark_current_revision']) || !empty($_REQUEST['rvy_approval'])) {	//phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			global $post;													//phpcs:ignore VariableAnalysis.CodeAnalysis.VariableAnalysis.VariableRedeclaration
+		}
+
+		//phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		if ((!empty($_REQUEST['mark_current_revision']) || !empty($_REQUEST['rvy_approval']) || rvy_in_revision_workflow($post) || ('revision' == $post->post_type)) && !isset($_REQUEST['fl_builder'])) {
+			add_filter('redirect_canonical', array($this, 'flt_revision_preview_url'), 10, 2);
+
+			if (!empty($_REQUEST['mark_current_revision']) || !empty($_REQUEST['rvy_approval'])) {										//phpcs:ignore WordPress.Security.NonceVerification.Recommended
+				$published_post_id = (!empty($post)) ? $post->ID : 0;
+				$revision_id = $published_post_id;
+			} else {
+				$published_post_id = rvy_post_id($revision_id);
+
+				if (!rvy_can_read_revision_and_parent($revision_id)) {
+                    wp_die(esc_html__('You are not allowed to view this revision.', 'revisionary'), '', ['response' => 403]);
+				}
+
+				do_action('revisionary_preview_load', $revision_id, $published_post_id);
+
+                // Preview is read-only: missing metadata inherits through fltGetPostMeta().
+
+                // Multiple Authors terms inherit through the read-only term filter too.
+
+			}
+
+			if (empty($post)) {
+				return;
+			}
+
+			$html = self::previewBarHtml($post, $published_post_id);
+			if ($html) {
+				// Keep workflow preview controls outside integrated builder canvases.
+				// Preview authorization above still runs for the builder shell.
+				$suppress_preview_bar = apply_filters('revisionary_suppress_preview_bar', false, $revision_id);
+				if (!$suppress_preview_bar && function_exists('bricks_is_builder_main') && bricks_is_builder_main()) {
+					$suppress_preview_bar = true;
+				}
+				if (!$suppress_preview_bar) {
+					add_action('wp_enqueue_scripts', [$this, 'rvyEnqueueStyle'], 50);
+
+					add_action('wp_enqueue_scripts', [$this, 'rvyEnqueuePreviewJS']);
+
+					if (defined('REVISIONARY_LEGACY_PREVIEW_OUTPUT')) {
+						new RvyScheduledHtml( $html, 'wp_head', 99 );  // this should be inserted at the top of <body> instead, but currently no way to do it
+					} else {
+						new RvyScheduledHtml( $html, 'wp_print_scripts', 99 );
+					}
+				}
+			}
+		}
+	}
+
+	/** Standard preview markup, without preview initialization or metadata writes. */
+	public static function previewBarHtml($post, $published_post_id, $editor_shell = false) {
+		$revision_id = $post->ID;
+		if (!rvy_can_read_revision_and_parent($revision_id)) { return ''; }
+				$datef = get_option('date_format') . ' ' . get_option('time_format');
+			$date = agp_date_i18n( $datef, strtotime( $post->post_date ) );
+
+			$color = '#ccc';
+			$class = '';
+			$message = '';
+			$compact_caption = '';
+
+			// This topbar is presently only for those with restore / approve / publish rights
+			$type_obj = get_post_type_object( $post->post_type );
+
+			$can_publish = current_user_can('edit_post', $published_post_id);
+
+			$redirect_arg = ( ! empty($_REQUEST['rvy_redirect']) ) ? "&rvy_redirect=" . esc_url_raw(wp_unslash($_REQUEST['rvy_redirect'])) : '';  //phpcs:ignore WordPress.Security.NonceVerification.Recommended
+
+			load_plugin_textdomain('revisionary', false, dirname(plugin_basename(REVISIONARY_FILE)) . '/languages');	// phpcs:ignore PluginCheck.CodeAnalysis.DiscouragedFunctions.load_plugin_textdomainFound
+
+			$published_url = ($published_post_id) ? get_permalink($published_post_id) : '';
+			$diff_url = rvy_compare_url($revision_id);
+			$queue_page = ( 'future-revision' === $post->post_mime_type )
+				? 'admin.php?page=revisionary-q&post_status=future-revision'
+				: 'admin.php?page=revisionary-q';
+			$queue_url = add_query_arg(
+				[
+					'published_post' => $published_post_id,
+					'all' => 1,
+				],
+				rvy_admin_url( $queue_page )
+			);
+
+			if (((!rvy_get_option('revisor_hide_others_revisions') || current_user_can('list_others_revisions')) && !empty($type_obj) && current_user_can($type_obj->cap->edit_posts)) || rvy_can_read_post($revision_id)) {
+				if ($published_url) {
+					$view_published = sprintf(
+						apply_filters(
+							'revisionary_list_caption',
+							esc_html__("%sManage%s", 'revisionary'),
+							$post // revision
+						),
+						"<a href='$queue_url' class='rvy-preview-link' target='_revision_list'>",
+						'</a> <span class="rvy-preview-link">&bull;</span> '
+					);
+
+					if (current_user_can('edit_post', $revision_id)) {
+						$view_published .= sprintf(
+							apply_filters(
+								'revisionary_preview_compare_view_caption',
+								esc_html__("%sCompare%s%sView Published Post%s", 'revisionary'),
+								$post // revision
+							),
+							"<a href='$diff_url' class='rvy-preview-link' target='_revision_diff'>",
+							'</a> <span class="rvy-preview-link">&bull;</span> ',
+							"<a href='$published_url' class='rvy-preview-link rvy_has_empty_spacing'>",
+							'</a> <span class="rvy-preview-link">&bull;</span> '
+						);
+					} else {
+						$view_published .= sprintf(
+							apply_filters(
+								'revisionary_preview_view_caption',
+								esc_html__("%sView Published Post%s", 'revisionary'),
+								$post // revision
+							),
+							"<a href='$published_url' class='rvy-preview-link'>",
+							"</a> <span class='rvy-preview-link'>&bull;</span> "
+						);
+					}
+				} else {
+					$view_published = '';
+				}
+			} else { // @todo
+				$view_published = ($published_url)
+				? sprintf(
+					apply_filters(
+						'revisionary_preview_view_caption',
+						esc_html__("%sView Published Post%s", 'revisionary'),
+						$post // revision
+					),
+					"<a href='$published_url' class='rvy-preview-link'>",
+					"</a> <span class='rvy-preview-link'>&bull;</span> "
+					)
+				: '';
+			}
+
+			if (current_user_can('edit_post', $revision_id)) {
+				$edit_url = apply_filters('revisionary_preview_edit_url', rvy_admin_url("post.php?action=edit&amp;post=$revision_id"), $revision_id);
+				$edit_button = "<a href='$edit_url' class='rvy-preview-link rvy_has_empty_spacing'>" . esc_html__('Edit', 'revisionary') . '</a>';
+
+				if (empty($_REQUEST['mark_current_revision']) && empty($_REQUEST['rvy_approval'])) {											// phpcs:ignore WordPress.Security.NonceVerification.Recommended
+					$edit_button .= ' <span class="rvy-preview-link">&bull;</span> ';
+				}
+			} else {
+				$edit_button = '';
+			}
+
+			$is_past_revision = ('revision' === $post->post_type);
+			if ($is_past_revision) {
+				$publish_url = $can_publish
+					? wp_nonce_url(rvy_admin_url("admin.php?page=rvy-revisions&revision=$revision_id&action=restore$redirect_arg"), "restore-post_$published_post_id|$revision_id")
+					: '';
+			} elseif ( !in_array( $post->post_mime_type, array( 'pending-revision', 'revision-approved', 'future-revision', 'inherit' ), true ) ) {
+				if ($can_edit = current_user_can('edit_post', $revision_id)) {
+				$submit_url = rvy_admin_url("admin.php?page=rvy-revisions&revision=$revision_id&action=submit$redirect_arg");
+				$submit_url = apply_filters('revisionary_preview_submit_url', $submit_url, $revision_id);
+				$submit_url = wp_nonce_url($submit_url, "submit-post_$published_post_id|$revision_id");
+					$publish_url =  wp_nonce_url( rvy_admin_url("admin.php?page=rvy-revisions&revision=$revision_id&action=approve$redirect_arg"), "approve-post_$published_post_id|$revision_id" );
+				}
+			} elseif ($can_approve = current_user_can('approve_revision', $revision_id)) {
+				if ( !in_array( $post->post_mime_type, array( 'future-revision', 'inherit' ), true ) ) {
+					$publish_url = wp_nonce_url( rvy_admin_url("admin.php?page=rvy-revisions&revision=$revision_id&action=approve$redirect_arg"), "approve-post_$published_post_id|$revision_id" );
+
+				} elseif ( in_array( $post->post_mime_type, array( 'future-revision' ), true ) ) {
+					$publish_url = wp_nonce_url( rvy_admin_url("admin.php?page=rvy-revisions&revision=$revision_id&action=publish$redirect_arg"), "publish-post_$published_post_id|$revision_id" );
+
+				} elseif ( in_array( $post->post_status, array( 'inherit' ), true ) ) {
+					$publish_url = wp_nonce_url( rvy_admin_url("admin.php?page=rvy-revisions&revision=$revision_id&action=restore$redirect_arg"), "restore-post_$published_post_id|$revision_id" );
+
+				} else {
+					$publish_url = '';
+				}
+			} else {
+				$publish_url = '';
+			}
+
+			if (('inherit' != $post->post_status || rvy_get_option('revision_archive_deletion')) && (is_content_administrator_rvy() || current_user_can('delete_post', $post->ID)) && !defined('REVISIONARY_PREVIEW_NO_DELETE_BUTTON')) {
+				$delete_url = ('inherit' == $post->post_status)
+				? esc_url(wp_nonce_url(admin_url("admin.php?page=rvy-revisions&amp;action=delete&amp;revision={$post->ID}"), 'delete-revision_' . $post->ID ))
+				: get_delete_post_link($post->ID, '', true);
+
+				$delete_button = '<a href="' . $delete_url . '" class="button button-secondary button-delete">' . esc_html__('Delete', 'revisionary') . '</a>';
+			} else {
+				$delete_button = '';
+			}
+
+			if (('revision' == $post->post_type) 
+			&& (
+				get_post_field('post_modified_gmt', $post->post_parent) == get_post_meta($revision_id, '_rvy_published_gmt', true) 
+				&& empty($_REQUEST['mark_current_revision']) && empty($_REQUEST['rvy_approval'])														//phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			)
+			) {
+				if ($post = get_post($post->post_parent)) {				// phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited
+					if ('revision' != $post->post_type && !rvy_in_revision_workflow($post)) {
+						$url = add_query_arg('mark_current_revision', 1, get_permalink($post->ID));
+						wp_safe_redirect($url);
+						exit;
+					}
+				}
+			} else {
+				// Native archives have no workflow MIME status; always use the Past Revision bar.
+				switch ($is_past_revision ? 'inherit' : $post->post_status) {
+				case 'draft' :
+				case 'draft-revision' :	 // If permissions_compat_mode setting is enabled, revision status is stored directly to post_status column
+					$class = 'draft';
+					$status_obj = get_post_status_object(get_post_field('post_status', rvy_post_id($revision_id)));
+
+					$approve_caption = esc_html__( 'Approve', 'revisionary' );
+
+					if (!empty($submit_url) && current_user_can("set_revision_pending-revision", $revision_id)) {
+						$submit_caption = esc_html__( 'Submit', 'revisionary' );
+						$publish_button = '<a href="' . $submit_url . '" class="button button-secondary rvy-submit-revision">' . $submit_caption . '</a>';
+					} else {
+						$publish_button = '';
+					}
+
+					if ($can_publish || !empty($can_approve)) {
+						$publish_caption = (!empty($status_obj->public) || !empty($status_obj->private)) ? esc_html__('Approve', 'revisionary') : $approve_caption;
+						$publish_button .= ($can_publish) ? '<a href="' . $publish_url . '" class="button button-primary rvy-approve-revision">' . $publish_caption . '</a>' : '';
+					}
+					
+					if (!empty($_REQUEST['elementor-preview'])) {													//phpcs:ignore WordPress.Security.NonceVerification.Recommended
+						if ('pending-revision' == $post->post_mime_type) {
+							$message = sprintf( esc_html__('This Revision is Submitted for Approval. %s %s %s', 'revisionary'), '', '', '' );
+						} else {
+							$message = sprintf( esc_html__('This is a %s. %s %s %s', 'revisionary'), pp_revisions_status_label($post->post_mime_type, 'name'), '', '', '');
+						}
+					} else {
+						if ('pending-revision' == $post->post_mime_type) {
+							$message = sprintf( esc_html__('This Revision is Submitted for Approval. %s %s %s', 'revisionary'), $view_published, $edit_button, $publish_button . $delete_button );
+						} else {
+							$message = sprintf( esc_html__('This is a %s. %s %s %s', 'revisionary'), pp_revisions_status_label($post->post_mime_type, 'name'), $view_published, $edit_button, $publish_button . $delete_button );
+						}
+					}
+					$compact_caption = sprintf( esc_html__( '%s.', 'revisionary' ), pp_revisions_status_label( $post->post_mime_type, 'name' ) );
+
+					break;
+
+					// alternate: no break here; output hidden pending-revision top bar
+
+				// phpcs:ignore Squiz.PHP.CommentedOutCode.Found
+				//case 'pending-revision' :
+				default :
+				if (empty($_REQUEST['mark_current_revision']) && empty($_REQUEST['rvy_approval']) && !$is_past_revision) {						// phpcs:ignore WordPress.Security.NonceVerification.Recommended
+					if ('future-revision' != $post->post_mime_type) {
+						$approve_caption = esc_html__( 'Approve', 'revisionary' );
+
+						if ($can_publish && !defined('REVISIONARY_PREVIEW_NO_DECLINE_BUTTON')) {
+							$decline_url = wp_nonce_url(admin_url("post.php?post=$revision_id&action=decline_revision"), "decline-revision_{$post->ID}");
+							$decline_button = ($can_publish) ? '<a href="' . $decline_url . '" class="button button-secondary">' . esc_html__('Decline', 'revisionary') . '</a>' : '';
+						} else {
+							$decline_button = '';
+						}
+
+						$decline_button .= $delete_button;
+
+						if ( strtotime( $post->post_date_gmt ) > agp_time_gmt() ) {
+							$class = 'pending_future';
+							$approve_caption = esc_html__('Schedule', 'revisionary');
+							$publish_button = ($can_publish || !empty($can_approve)) ? '<a href="' . $publish_url . '" class="button button-primary rvy-approve-revision">' . $approve_caption . '</a>' : '';
+							
+							if ('pending-revision' == $post->post_mime_type) {
+								if (!empty($_REQUEST['elementor-preview'])) {												//phpcs:ignore WordPress.Security.NonceVerification.Recommended
+									$message = sprintf( esc_html__('This is a %s (for %s). %s %s %s', 'revisionary'), pp_revisions_status_label('pending-revision', 'name'), $date, '', '', '');
+								} else {
+									$message = sprintf( esc_html__('This is a %s (for %s). %s %s %s', 'revisionary'), pp_revisions_status_label('pending-revision', 'name'), $date, $view_published, $edit_button, $publish_button . $decline_button );
+								}
+								$compact_caption = sprintf( esc_html__( '%1$s (for %2$s).', 'revisionary' ), pp_revisions_status_label( 'pending-revision', 'name' ), $date );
+							} else {
+								if (!empty($_REQUEST['elementor-preview'])) {												//phpcs:ignore WordPress.Security.NonceVerification.Recommended
+									$message = sprintf( esc_html__('Revision status: %s (for %s) %s %s %s', 'revisionary'), pp_revisions_status_label($post->post_mime_type, 'name'), $date, '', '', '');
+								} else {
+									$message = sprintf( esc_html__('Revision status: %s (for %s) %s %s %s', 'revisionary'), pp_revisions_status_label($post->post_mime_type, 'name'), $date, $view_published, $edit_button, $publish_button . $decline_button );
+								}
+								$compact_caption = sprintf( esc_html__( 'Revision status: %1$s (for %2$s)', 'revisionary' ), pp_revisions_status_label( $post->post_mime_type, 'name' ), $date );
+							}
+						} else {
+							$class = 'pending';
+							$status_obj = get_post_status_object(get_post_field('post_status', rvy_post_id($revision_id)));
+							$publish_caption = (!empty($status_obj->public) || !empty($status_obj->private)) ? esc_html__('Approve', 'revisionary') : $approve_caption;
+							$publish_button = ($can_publish || !empty($can_approve)) ? '<a href="' . $publish_url . '" class="button button-primary rvy-approve-revision">' . $publish_caption . '</a>' : '';
+							
+							if ('pending-revision' == $post->post_mime_type) {
+								if (!empty($_REQUEST['elementor-preview'])) {				// phpcs:ignore WordPress.Security.NonceVerification.Recommended
+									if ('pending-revision' == $post->post_mime_type) {
+										$message = sprintf( esc_html__('This Revision is Submitted for Approval. %s %s %s', 'revisionary'), '', '', '' );
+									} else {												//phpcs:ignore WordPress.Security.NonceVerification.Recommended
+										$message = sprintf( esc_html__('This is a %s. %s %s %s', 'revisionary'), pp_revisions_status_label('pending-revision', 'name'), '', '', '' );
+									}
+								} else {
+									if ('pending-revision' == $post->post_mime_type) {
+										$message = sprintf( esc_html__('This Revision is Submitted for Approval. %s %s %s', 'revisionary'), $view_published, $edit_button, $publish_button . $decline_button );
+									} else {
+										$message = sprintf( esc_html__('This is a %s. %s %s %s', 'revisionary'), pp_revisions_status_label('pending-revision', 'name'), $view_published, $edit_button, $publish_button . $decline_button );
+									}
+								}
+								$compact_caption = sprintf( esc_html__( '%s.', 'revisionary' ), pp_revisions_status_label( 'pending-revision', 'name' ) );
+							} else {
+								if (!empty($_REQUEST['elementor-preview'])) {												//phpcs:ignore WordPress.Security.NonceVerification.Recommended
+									$message = sprintf( esc_html__('Revision status: %s %s %s %s', 'revisionary'), pp_revisions_status_label($post->post_mime_type, 'name'), '', '', '' );
+								} else {
+									$message = sprintf( esc_html__('Revision status: %s %s %s %s', 'revisionary'), pp_revisions_status_label($post->post_mime_type, 'name'), $view_published, $edit_button, $publish_button . $decline_button );
+								}
+								$compact_caption = sprintf( esc_html__( 'Revision status: %s', 'revisionary' ), pp_revisions_status_label( $post->post_mime_type, 'name' ) );
+							}
+						}
+
+						break;
+
+					// phpcs:ignore Squiz.PHP.CommentedOutCode.Found
+					//case 'future-revision' :
+					} else {
+						$class = 'future';
+						
+						$edit_url = rvy_admin_url("post.php?action=edit&amp;post=$revision_id");
+						$publish_button = ($can_publish) ? '<a href="' . $publish_url . '" class="button button-primary">' . esc_html__( 'Publish Now', 'revisionary' ) . '</a>' : '';
+						
+						if (!empty($_REQUEST['elementor-preview'])) {													//phpcs:ignore WordPress.Security.NonceVerification.Recommended
+								$message = sprintf( esc_html__('This is a %s (for %s). %s %s %s', 'revisionary'), pp_revisions_status_label('future-revision', 'name'), $date, '', '', '' );
+							} else {
+								$message = sprintf( esc_html__('This is a %s (for %s). %s %s %s', 'revisionary'), pp_revisions_status_label('future-revision', 'name'), $date, $view_published, $edit_button, $publish_button );
+							}
+							$compact_caption = sprintf( esc_html__( '%1$s (for %2$s).', 'revisionary' ), pp_revisions_status_label( 'future-revision', 'name' ), $date );
+
+						break;
+					}
+				}
+
+				// phpcs:ignore Squiz.PHP.CommentedOutCode.Found
+				//case '' :
+				//default:
+					if (!empty($_REQUEST['mark_current_revision']) || !empty($_REQUEST['rvy_approval'])) {												//phpcs:ignore WordPress.Security.NonceVerification.Recommended
+						$class = 'published';
+
+						if (empty($can_edit)) {
+							$edit_button = '';
+						}
+
+						$message = (!empty($_REQUEST['rvy_approval']))												// phpcs:ignore WordPress.Security.NonceVerification.Recommended
+						? esc_html__('The revision was approved and is now live on the site. %s', 'revisionary')
+						: esc_html__('This is the Current Revision. %s', 'revisionary');
+
+						if (!empty($_REQUEST['elementor-preview'])) {												//phpcs:ignore WordPress.Security.NonceVerification.Recommended
+							$message = sprintf( $message, '' );
+							} else {
+								$message = sprintf( $message, $edit_button );
+							}
+							$compact_caption = ! empty( $_REQUEST['rvy_approval'] ) // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+								? esc_html__( 'Revision approved and live.', 'revisionary' )
+								: esc_html__( 'Current Revision.', 'revisionary' );
+
+					} elseif ($is_past_revision) {
+						if ( current_user_can('edit_post', $revision_id ) ) {
+							$class = 'past';
+							$date = agp_date_i18n( $datef, strtotime( $post->post_modified ) );
+
+							if (rvy_get_option('revision_restore_require_cap') 
+							&& !is_content_administrator_rvy() && !current_user_can('restore_revisions')) {
+								$publish_button = '';
+							} else {
+								$publish_button = ($can_publish) ? '<a href="' . $publish_url . '" class="button button-secondary">' . esc_html__( 'Restore', 'revisionary' ) . '</a>' : '';
+							}
+
+							if (!empty($_REQUEST['elementor-preview'])) {											//phpcs:ignore WordPress.Security.NonceVerification.Recommended
+								$message = sprintf( esc_html__('This is a Past Revision (from %s). %s %s', 'revisionary'), $date, '', '' );
+								} else {
+									$message = sprintf( esc_html__('This is a Past Revision (from %s). %s %s', 'revisionary'), $date, $view_published, $publish_button . $delete_button );
+								}
+								$compact_caption = sprintf( esc_html__( 'Past Revision (from %s).', 'revisionary' ), $date );
+						}
+					}
+				}
+
+				$position_bar = $editor_shell ? 'relative' : (apply_filters('revisionary_admin_bar_absolute', !defined('REVISIONARY_PREVIEW_BAR_RELATIVE')) ? 'fixed' : 'relative');  // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+				$legacy_divi_offset = !$editor_shell && !empty($_REQUEST['et_fb']) && !defined('PP_REVISIONS_DIVI_NO_ADMIN_BAR')													  // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+					&& function_exists('et_divi_replace_parent_stylesheet')
+					&& (!defined('ET_BUILDER_PRODUCT_VERSION') || version_compare(ET_BUILDER_PRODUCT_VERSION, '4.14.8', '<='));
+				$html = '<div id="pp_revisions_top_bar" class="' . esc_attr("rvy_view_revision rvy_view_" . $class) . '"'
+					. ' data-position-bar="' . esc_attr($position_bar) . '" data-legacy-divi-offset="' . ($legacy_divi_offset ? '1' : '0') . '"'
+					. ($editor_shell ? ' data-rvy-editor-shell="siteorigin"' : '')
+					. ' data-menu-label="' . esc_attr__('More revision actions', 'revisionary') . '">' .
+							'<div class="rvy_preview_msgspan" data-compact-caption="' . esc_attr( $compact_caption ) . '">' . $message . '</div></div>';
+				return $html;
+		}
+		return '';
+	}
+
+	function rvyEnqueueStyle() {
+		wp_enqueue_style('revisionary-front', esc_url(plugins_url('', REVISIONARY_FILE)) . '/revisionary-front.css', [], defined('PUBLISHPRESS_REVISIONS_PRO_VERSION') ? PUBLISHPRESS_REVISIONS_PRO_VERSION : PUBLISHPRESS_REVISIONS_VERSION);
+	}
+
+	function rvyEnqueuePreviewJS() {
+		wp_enqueue_script('revisionary-preview-bar', plugins_url('revisionary-preview.js', REVISIONARY_FILE), ['jquery'], defined('PUBLISHPRESS_REVISIONS_PRO_VERSION') ? PUBLISHPRESS_REVISIONS_PRO_VERSION : PUBLISHPRESS_REVISIONS_VERSION, true);
+	}
+
+	// Compatibility entry point for callers which previously printed the inline bar script.
+	function rvyPreviewJS() {
+		$this->rvyEnqueuePreviewJS();
+		wp_print_scripts('revisionary-preview-bar');
+			}
+
+}
+
+class RvyScheduledHtml {
+	private $html;
+	private $action;
+	private $priority;
+
+	function __construct( $html, $action, $priority = 10 ) {
+		$this->html = $html;
+		$this->action = $action;
+		$this->priority = $priority;
+
+		add_action( $action, array( $this, 'echo_html' ), $priority );
+	}
+
+	function echo_html() {
+		echo $this->html;		// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+		remove_action( $this->action, array( $this, 'echo_html' ), $this->priority );
+	}
+}

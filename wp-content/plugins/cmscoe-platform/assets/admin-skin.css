@@ -1,0 +1,8 @@
+/* CMS COE admin color scheme. Colors come from CSS custom properties set from Admin skin settings. */
+#adminmenu, #adminmenuback, #adminmenuwrap, #wpadminbar { background: var(--cmscoe-skin-primary, #1f2933); }
+#adminmenu .wp-has-current-submenu .wp-submenu, #adminmenu .wp-submenu { background: color-mix(in srgb, var(--cmscoe-skin-primary, #1f2933) 85%, #000); }
+#adminmenu li.current a.menu-top, #adminmenu .wp-has-current-submenu > a.menu-top { background: var(--cmscoe-skin-secondary, #2271b1); color: #fff; }
+.wp-core-ui .button-primary { background: var(--cmscoe-skin-secondary, #2271b1); border-color: var(--cmscoe-skin-secondary, #2271b1); color: #fff; }
+a { color: var(--cmscoe-skin-secondary, #2271b1); }
+a:focus, .wp-core-ui .button:focus, .wp-core-ui .button-primary:focus, #adminmenu a:focus { outline: 2px solid currentColor; outline-offset: 2px; box-shadow: 0 0 0 4px #fff; }
+@media (forced-colors: active) { #adminmenu li.current a.menu-top { forced-color-adjust: auto; } }

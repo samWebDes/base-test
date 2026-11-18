@@ -1,0 +1,20 @@
+{
+	"$schema": "https://schemas.wp.org/trunk/block.json",
+	"apiVersion": 3,
+	"name": "cmscoe/forge-accordion-item",
+	"version": "0.2.0",
+	"title": "Accordion section",
+	"category": "cmscoe-forge",
+	"icon": "arrow-down-alt2",
+	"description": "One expandable section of a Forge Accordion: a heading and its content.",
+	"parent": [ "cmscoe/forge-accordion" ],
+	"textdomain": "cmscoe-forge",
+	"attributes": {
+		"heading": { "type": "string", "default": "" },
+		"open": { "type": "boolean", "default": false }
+	},
+	"usesContext": [ "cmscoe/accordionHeadingLevel" ],
+	"supports": { "html": false, "reusable": false },
+	"editorScript": "file:./index.js",
+	"render": "file:./render.php"
+}

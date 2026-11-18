@@ -1,0 +1,14 @@
+{
+	"name": "cmscoe/forge",
+	"description": "Shared Tyler Forge runtime and Forge-backed blocks for CMS COE WordPress sites.",
+	"type": "wordpress-plugin",
+	"version": "0.3.0",
+	"license": "GPL-2.0-or-later",
+	"require": {
+		"php": ">=8.3",
+		"composer/installers": "^2.3"
+	},
+	"extra": {
+		"installer-name": "cmscoe-forge"
+	}
+}

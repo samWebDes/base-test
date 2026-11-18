@@ -1,0 +1,20 @@
+{
+	"$schema": "https://schemas.wp.org/trunk/block.json",
+	"apiVersion": 3,
+	"name": "cmscoe/entry-fields",
+	"version": "0.2.0",
+	"title": "Entry fields",
+	"category": "cmscoe-forge",
+	"icon": "editor-table",
+	"description": "Shows the custom fields of the current entry as a labelled list. Works for every content type, including ones Administrators create in the builder.",
+	"keywords": [ "fields", "details", "facts", "meta" ],
+	"textdomain": "cmscoe-platform",
+	"usesContext": [ "postId", "postType" ],
+	"attributes": {
+		"showGroupHeadings": { "type": "boolean", "default": true }
+	},
+	"supports": { "html": false, "reusable": false, "align": [ "wide" ] },
+	"editorScript": "file:./index.js",
+	"style": "file:./style.css",
+	"render": "file:./render.php"
+}

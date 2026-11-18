@@ -1,0 +1,12 @@
+# Local-only
+wp-config-local.php
+wp-config-ddev.php
+.ddev/.gitignore
+.ddev/db_snapshots/
+/wp-content/uploads/
+/wp-content/debug.log
+/wp-content/upgrade/
+/vendor/
+/node_modules/
+.DS_Store
+/tests/reports/

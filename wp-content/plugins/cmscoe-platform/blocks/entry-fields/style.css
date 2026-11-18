@@ -1,0 +1,6 @@
+.cmscoe-entry-fields__list { display: grid; gap: var(--wp--preset--spacing--30, 1rem); margin: 0 0 var(--wp--preset--spacing--40, 1.5rem); }
+.cmscoe-entry-fields__row { display: grid; grid-template-columns: minmax(8rem, 14rem) 1fr; gap: var(--wp--preset--spacing--30, 1rem); border-block-end: 1px solid currentColor; padding-block-end: var(--wp--preset--spacing--20, 0.5rem); }
+.cmscoe-entry-fields__row dt { font-weight: 700; }
+.cmscoe-entry-fields__row dd { margin: 0; overflow-wrap: anywhere; }
+.cmscoe-entry-fields__tags { margin: 0; padding-inline-start: 1.25rem; }
+@media (max-width: 40em) { .cmscoe-entry-fields__row { grid-template-columns: 1fr; gap: 0.25rem; } }

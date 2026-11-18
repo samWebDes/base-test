@@ -1,0 +1,8 @@
+.cmscoe-accordion__item { border-block-end: 1px solid var(--forge-theme-outline, #8f9aa6); }
+.cmscoe-accordion__heading { margin: 0; font-size: inherit; }
+.cmscoe-accordion__trigger { display: flex; width: 100%; justify-content: space-between; align-items: center; gap: 1rem; min-height: 2.75rem; padding: var(--wp--preset--spacing--30, 1rem) 0; border: 0; background: none; color: inherit; font: inherit; font-weight: 700; font-size: var(--wp--preset--font-size--large, 1.25rem); text-align: start; cursor: pointer; }
+.cmscoe-accordion__trigger:focus-visible { outline: 3px solid currentColor; outline-offset: 2px; }
+.cmscoe-accordion__panel { padding-block-end: var(--wp--preset--spacing--30, 1rem); }
+/* Before Forge loads (or without JS), panels stay visible and the open icon is hidden. */
+.cmscoe-accordion forge-open-icon:not(:defined) { display: none; }
+@media (forced-colors: active) { .cmscoe-accordion__item { border-color: CanvasText; } }

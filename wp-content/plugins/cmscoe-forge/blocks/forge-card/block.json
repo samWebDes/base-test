@@ -1,0 +1,20 @@
+{
+	"$schema": "https://schemas.wp.org/trunk/block.json",
+	"apiVersion": 3,
+	"name": "cmscoe/forge-card",
+	"version": "0.2.0",
+	"title": "Forge Card",
+	"category": "cmscoe-forge",
+	"icon": "id-alt",
+	"description": "A content card rendered with the Tyler Forge card component. Holds a heading, short text, an image, and a Forge button.",
+	"keywords": [ "card", "teaser", "forge" ],
+	"textdomain": "cmscoe-forge",
+	"attributes": {
+		"raised": { "type": "boolean", "default": false }
+	},
+	"supports": { "html": false, "reusable": false },
+	"editorScript": "file:./index.js",
+	"script": "cmscoe-forge-runtime",
+	"style": "file:./style.css",
+	"render": "file:./render.php"
+}

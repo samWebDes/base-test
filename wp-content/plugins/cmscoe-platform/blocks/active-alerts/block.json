@@ -1,0 +1,21 @@
+{
+	"$schema": "https://schemas.wp.org/trunk/block.json",
+	"apiVersion": 3,
+	"name": "cmscoe/active-alerts",
+	"version": "0.2.0",
+	"title": "Active alerts",
+	"category": "cmscoe-forge",
+	"icon": "warning",
+	"description": "Shows current, unexpired alerts as Forge inline messages. Place it in the header so alerts appear site-wide.",
+	"keywords": [ "alert", "emergency", "notice", "closure" ],
+	"textdomain": "cmscoe-platform",
+	"attributes": {
+		"postType": { "type": "string", "default": "" },
+		"max": { "type": "integer", "default": 3, "minimum": 1, "maximum": 10 }
+	},
+	"supports": { "html": false, "reusable": false, "multiple": false, "align": [ "wide", "full" ] },
+	"editorScript": "file:./index.js",
+	"script": "cmscoe-forge-runtime",
+	"style": "file:./style.css",
+	"render": "file:./render.php"
+}

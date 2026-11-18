@@ -1,0 +1,2 @@
+.cmscoe-active-alerts { display: grid; gap: var(--wp--preset--spacing--20, 0.5rem); padding-block: var(--wp--preset--spacing--20, 0.5rem); }
+.cmscoe-active-alerts__item a { color: inherit; font-weight: 700; margin-inline-start: 0.5rem; }

@@ -1,0 +1,48 @@
+<?xml version="1.0"?>
+<ruleset name="tyler-cms">
+	<description>WordPress Coding Standards for site code. The shared cmscoe-* packages are checked in the starter kit before release.</description>
+	<file>wp-content/plugins/tyler-cms-content-model</file>
+	<file>wp-content/themes/tyler-cms-theme</file>
+	<file>bin</file>
+	<file>tests</file>
+	<exclude-pattern>*/build/*</exclude-pattern>
+	<exclude-pattern>*/node_modules/*</exclude-pattern>
+	<exclude-pattern>*.js</exclude-pattern>
+	<exclude-pattern>*.css</exclude-pattern>
+	<arg name="extensions" value="php"/>
+	<arg value="sp"/>
+	<config name="testVersion" value="8.3-"/>
+	<config name="minimum_wp_version" value="7.0"/>
+	<rule ref="WordPress"/>
+	<rule ref="PHPCompatibilityWP"/>
+	<!-- SCF/ACF hooks use "/" as the word separator (acf/settings/save_json). -->
+	<rule ref="WordPress.NamingConventions.ValidHookName">
+		<properties><property name="additionalWordDelimiters" value="/"/></properties>
+	</rule>
+	<rule ref="WordPress.WP.I18n">
+		<properties>
+			<property name="text_domain" type="array">
+				<element value="tyler-cms-content-model"/>
+				<element value="tyler-cms-theme"/>
+			</property>
+		</properties>
+	</rule>
+	<rule ref="WordPress.WP.Capabilities">
+		<properties>
+			<property name="custom_capabilities" type="array">
+				<element value="cmscoe_manage_content_model"/>
+				<element value="cmscoe_manage_admin_skin"/>
+				<element value="cmscoe_duplicate_pages"/>
+			</property>
+		</properties>
+	</rule>
+	<!-- index.asset.php mirrors the @wordpress/scripts generated filename convention. -->
+	<rule ref="WordPress.Files.FileName.NotHyphenatedLowercase"><exclude-pattern>*.asset.php</exclude-pattern></rule>
+	<rule ref="Squiz.Commenting.FileComment.Missing"><exclude-pattern>*.asset.php</exclude-pattern></rule>
+	<!-- bin/ scripts run via `wp eval-file`, which includes them inside a function scope. -->
+	<rule ref="WordPress.WP.GlobalVariablesOverride"><exclude-pattern>*/bin/*</exclude-pattern><exclude-pattern>*/tests/*</exclude-pattern></rule>
+	<rule ref="WordPress.Files.FileName">
+		<properties><property name="is_theme" value="false"/></properties>
+		<exclude-pattern>*/includes/*</exclude-pattern>
+	</rule>
+</ruleset>

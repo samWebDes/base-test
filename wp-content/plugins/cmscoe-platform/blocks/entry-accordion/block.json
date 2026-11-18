@@ -1,0 +1,21 @@
+{
+	"$schema": "https://schemas.wp.org/trunk/block.json",
+	"apiVersion": 3,
+	"name": "cmscoe/entry-accordion",
+	"version": "0.2.0",
+	"title": "Entry accordion",
+	"category": "cmscoe-forge",
+	"icon": "editor-help",
+	"description": "Lists entries of a content type (for example FAQs) as Forge expansion panels: the title is the heading, the content is the panel.",
+	"keywords": [ "faq", "accordion", "questions" ],
+	"textdomain": "cmscoe-platform",
+	"attributes": {
+		"postType": { "type": "string", "default": "" },
+		"max": { "type": "integer", "default": 50, "minimum": 1, "maximum": 100 },
+		"headingLevel": { "type": "integer", "enum": [ 2, 3 ], "default": 2 }
+	},
+	"supports": { "html": false, "reusable": false, "align": [ "wide" ] },
+	"editorScript": "file:./index.js",
+	"script": "cmscoe-forge-runtime",
+	"render": "file:./render.php"
+}

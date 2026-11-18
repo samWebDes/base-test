@@ -1,0 +1,69 @@
+{
+    "key": "post_type_cms_faq",
+    "title": "FAQs",
+    "menu_order": 0,
+    "active": true,
+    "post_type": "cms_faq",
+    "advanced_configuration": false,
+    "import_source": "",
+    "import_date": "",
+    "allow_ai_access": false,
+    "ai_description": "",
+    "labels": {
+        "name": "FAQs",
+        "singular_name": "FAQ",
+        "menu_name": "FAQs",
+        "all_items": "All FAQs",
+        "add_new_item": "Add New FAQ",
+        "edit_item": "Edit FAQ",
+        "view_item": "View FAQ",
+        "search_items": "Search FAQs",
+        "not_found": "No FAQs found"
+    },
+    "description": "A frequently asked question. The title is the question; the content is the answer.",
+    "public": true,
+    "hierarchical": false,
+    "exclude_from_search": false,
+    "publicly_queryable": true,
+    "show_ui": true,
+    "show_in_menu": true,
+    "admin_menu_parent": "",
+    "show_in_admin_bar": true,
+    "show_in_nav_menus": true,
+    "show_in_rest": true,
+    "rest_base": "",
+    "rest_namespace": "wp\/v2",
+    "rest_controller_class": "WP_REST_Posts_Controller",
+    "menu_position": null,
+    "menu_icon": {
+        "type": "dashicons",
+        "value": "dashicons-editor-help"
+    },
+    "rename_capabilities": true,
+    "singular_capability_name": "cms_faq",
+    "plural_capability_name": "cms_faqs",
+    "supports": [
+        "title",
+        "editor",
+        "revisions"
+    ],
+    "taxonomies": [
+        "cms_topic"
+    ],
+    "has_archive": true,
+    "has_archive_slug": "faqs",
+    "rewrite": {
+        "permalink_rewrite": "custom_permalink",
+        "slug": "faqs",
+        "feeds": true,
+        "pages": true,
+        "with_front": false
+    },
+    "query_var": "post_type_key",
+    "query_var_name": "",
+    "can_export": true,
+    "delete_with_user": false,
+    "register_meta_box_cb": "",
+    "enter_title_here": "",
+    "modified": 1794961698
+}

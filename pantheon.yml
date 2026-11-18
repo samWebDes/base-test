@@ -1,0 +1,17 @@
+# Pantheon site configuration. Verify php_version and database version against current Pantheon docs before first deploy.
+api_version: 1
+php_version: 8.4
+database:
+  version: 10.6
+enforce_https: full
+build_step: false
+protected_web_paths:
+  - /composer.json
+  - /composer.lock
+  - /package.json
+  - /package-lock.json
+  - /packages/
+  - /phpcs.xml.dist
+  - /tests/
+  - /docs/
+  - /xmlrpc.php

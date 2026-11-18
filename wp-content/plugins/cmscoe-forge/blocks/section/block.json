@@ -1,0 +1,67 @@
+{
+	"$schema": "https://schemas.wp.org/trunk/block.json",
+	"apiVersion": 3,
+	"name": "cmscoe/section",
+	"version": "0.2.0",
+	"title": "Section",
+	"category": "cmscoe-forge",
+	"icon": "layout",
+	"description": "Approved layout container for Editors and Reviewers. Inherits the site's content width and root padding, offers a grid option for cards, and can take a background image with a contrast overlay. Replaces core Group, Columns, and Cover for non-administrators.",
+	"keywords": [
+		"section",
+		"group",
+		"columns",
+		"grid",
+		"layout",
+		"cover",
+		"background"
+	],
+	"textdomain": "cmscoe-forge",
+	"attributes": {
+		"tagName": {
+			"type": "string",
+			"enum": [
+				"section",
+				"div"
+			],
+			"default": "section"
+		},
+		"label": {
+			"type": "string",
+			"default": ""
+		}
+	},
+	"supports": {
+		"html": false,
+		"align": [
+			"wide",
+			"full"
+		],
+		"anchor": true,
+		"color": {
+			"background": true,
+			"text": true,
+			"link": false,
+			"gradients": false
+		},
+		"spacing": {
+			"blockGap": true,
+			"padding": false,
+			"margin": false
+		},
+		"layout": {
+			"default": {
+				"type": "constrained"
+			},
+			"allowSwitching": true,
+			"allowSizingOnChildren": true
+		},
+		"background": {
+			"backgroundImage": true,
+			"backgroundSize": true
+		}
+	},
+	"editorScript": "file:./index.js",
+	"style": "file:./style.css",
+	"render": "file:./render.php"
+}

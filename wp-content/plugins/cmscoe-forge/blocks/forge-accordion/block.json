@@ -1,0 +1,22 @@
+{
+	"$schema": "https://schemas.wp.org/trunk/block.json",
+	"apiVersion": 3,
+	"name": "cmscoe/forge-accordion",
+	"version": "0.2.0",
+	"title": "Forge Accordion",
+	"category": "cmscoe-forge",
+	"icon": "list-view",
+	"description": "Expandable sections (FAQs, long instructions) rendered with Tyler Forge expansion panels. Replaces core Details for Editors and Reviewers.",
+	"keywords": [ "accordion", "faq", "toggle", "expand", "details" ],
+	"textdomain": "cmscoe-forge",
+	"attributes": {
+		"singleOpen": { "type": "boolean", "default": false },
+		"headingLevel": { "type": "integer", "enum": [ 2, 3, 4 ], "default": 3 }
+	},
+	"providesContext": { "cmscoe/accordionHeadingLevel": "headingLevel" },
+	"supports": { "html": false, "reusable": false, "align": [ "wide" ] },
+	"editorScript": "file:./index.js",
+	"script": "cmscoe-forge-runtime",
+	"style": "file:./style.css",
+	"render": "file:./render.php"
+}

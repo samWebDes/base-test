@@ -1,0 +1,179 @@
+Bundled license information:
+
+@tylertech/forge-core/dist/utils/platform.js:
+  /**
+   * @license
+   * Copyright Google LLC All Rights Reserved.
+   *
+   * Use of this source code is governed by an MIT-style license that can be
+   * found in the LICENSE file at https://angular.io/license
+   */
+
+@tylertech/forge-core/dist/index.js:
+  /**
+   * @license
+   * Copyright (c) 2022 Tyler Technologies, Inc.
+   * License: Apache-2.0
+   */
+
+@lit/reactive-element/css-tag.js:
+  /**
+   * @license
+   * Copyright 2019 Google LLC
+   * SPDX-License-Identifier: BSD-3-Clause
+   */
+
+@lit/reactive-element/reactive-element.js:
+lit-html/lit-html.js:
+lit-element/lit-element.js:
+@lit/reactive-element/decorators/custom-element.js:
+@lit/reactive-element/decorators/property.js:
+@lit/reactive-element/decorators/state.js:
+@lit/reactive-element/decorators/event-options.js:
+@lit/reactive-element/decorators/base.js:
+@lit/reactive-element/decorators/query.js:
+@lit/reactive-element/decorators/query-all.js:
+@lit/reactive-element/decorators/query-async.js:
+@lit/reactive-element/decorators/query-assigned-nodes.js:
+lit-html/directive.js:
+lit-html/async-directive.js:
+@lit/context/lib/decorators/provide.js:
+  /**
+   * @license
+   * Copyright 2017 Google LLC
+   * SPDX-License-Identifier: BSD-3-Clause
+   */
+
+lit-html/is-server.js:
+@lit/context/lib/decorators/consume.js:
+  /**
+   * @license
+   * Copyright 2022 Google LLC
+   * SPDX-License-Identifier: BSD-3-Clause
+   */
+
+@lit/reactive-element/decorators/query-assigned-elements.js:
+@lit/context/lib/context-request-event.js:
+@lit/context/lib/create-context.js:
+@lit/context/lib/controllers/context-consumer.js:
+@lit/context/lib/value-notifier.js:
+@lit/context/lib/controllers/context-provider.js:
+@lit/context/lib/context-root.js:
+  /**
+   * @license
+   * Copyright 2021 Google LLC
+   * SPDX-License-Identifier: BSD-3-Clause
+   */
+
+lit-html/directives/class-map.js:
+  /**
+   * @license
+   * Copyright 2018 Google LLC
+   * SPDX-License-Identifier: BSD-3-Clause
+   */
+
+@tylertech/forge/esm/core/utils/utils.js:
+@tylertech/forge/esm/core/utils/lit-utils.js:
+@tylertech/forge/esm/core/base/base-lit-element.js:
+@tylertech/forge/esm/core/utils/feature-detection.js:
+@tylertech/forge/esm/focus-indicator/focus-indicator.scss.js:
+@tylertech/forge/esm/focus-indicator/focus-indicator.js:
+@tylertech/forge/esm/constants.js:
+@tylertech/forge/esm/focus-indicator/focus-indicator-constants.js:
+@tylertech/forge/esm/focus-indicator/index.js:
+@tylertech/forge/esm/icon/icon-constants.js:
+@tylertech/forge/esm/icon/icon-registry.js:
+@tylertech/forge/esm/core/utils/svg-utils.js:
+@tylertech/forge/esm/icon/icon-utils.js:
+@tylertech/forge/esm/icon/icon.scss.js:
+@tylertech/forge/esm/icon/icon.js:
+@tylertech/forge/esm/core/delegates/base-component-delegate.js:
+@tylertech/forge/esm/icon/icon-component-delegate.js:
+@tylertech/forge/esm/icon/index.js:
+@tylertech/forge/esm/core/configuration/global-configuration.js:
+@tylertech/forge/esm/core/base/base-adapter.js:
+@tylertech/forge/esm/state-layer/state-layer-constants.js:
+@tylertech/forge/esm/state-layer/state-layer-utils.js:
+@tylertech/forge/esm/state-layer/state-layer-adapter.js:
+@tylertech/forge/esm/state-layer/state-layer-core.js:
+@tylertech/forge/esm/core/base/base-component.js:
+@tylertech/forge/esm/state-layer/state-layer.html.js:
+@tylertech/forge/esm/state-layer/state-layer.scss.js:
+@tylertech/forge/esm/state-layer/state-layer.js:
+@tylertech/forge/esm/state-layer/index.js:
+@tylertech/forge/esm/core/utils/reflect-utils.js:
+@tylertech/forge/esm/button/base/base-button-constants.js:
+@tylertech/forge/esm/button/base/base-button.js:
+@tylertech/forge/esm/button/button-constants.js:
+@tylertech/forge/esm/button/button.scss.js:
+@tylertech/forge/esm/button/button.js:
+@tylertech/forge/esm/button/button-component-delegate.js:
+@tylertech/forge/esm/button/index.js:
+@tylertech/forge/esm/card/card.scss.js:
+@tylertech/forge/esm/card/card.js:
+@tylertech/forge/esm/card/card-constants.js:
+@tylertech/forge/esm/card/index.js:
+@tylertech/forge/esm/core/base/index.js:
+@tylertech/forge/esm/core/configuration/index.js:
+@tylertech/forge/esm/core/decorators/global-configuration-decorator.js:
+@tylertech/forge/esm/core/decorators/index.js:
+@tylertech/forge/esm/core/delegates/form-field-component-delegate.js:
+@tylertech/forge/esm/core/delegates/index.js:
+@tylertech/forge/esm/core/utils/date-utils.js:
+@tylertech/forge/esm/core/utils/deferred.js:
+@tylertech/forge/esm/core/utils/dismissible-stack.js:
+@tylertech/forge/esm/core/utils/drag-drop-manager.js:
+@tylertech/forge/esm/core/utils/event-utils.js:
+@tylertech/forge/esm/core/utils/focus-group.js:
+@tylertech/forge/esm/core/utils/form-utils.js:
+@tylertech/forge/esm/core/utils/key-action.js:
+@tylertech/forge/esm/core/utils/position-utils.js:
+@tylertech/forge/esm/core/utils/time-utils.js:
+@tylertech/forge/esm/core/utils/index.js:
+@tylertech/forge/esm/core/mask/date-input-mask.js:
+@tylertech/forge/esm/core/mask/time-segment-parser.js:
+@tylertech/forge/esm/core/mask/intermediate-time-parser.js:
+@tylertech/forge/esm/core/mask/time-input-mask.js:
+@tylertech/forge/esm/core/mask/index.js:
+@tylertech/forge/esm/core/index.js:
+@tylertech/forge/esm/open-icon/open-icon-constants.js:
+@tylertech/forge/esm/open-icon/open-icon.scss.js:
+@tylertech/forge/esm/open-icon/open-icon.js:
+@tylertech/forge/esm/open-icon/index.js:
+@tylertech/forge/esm/expansion-panel/expansion-panel-constants.js:
+@tylertech/forge/esm/expansion-panel/expansion-panel-trigger-controller.js:
+@tylertech/forge/esm/expansion-panel/expansion-panel.scss.js:
+@tylertech/forge/esm/expansion-panel/expansion-panel.js:
+@tylertech/forge/esm/expansion-panel/index.js:
+@tylertech/forge/esm/inline-message/inline-message-constants.js:
+@tylertech/forge/esm/inline-message/inline-message.html.js:
+@tylertech/forge/esm/inline-message/inline-message.scss.js:
+@tylertech/forge/esm/inline-message/inline-message.js:
+@tylertech/forge/esm/inline-message/index.js:
+  /**
+   * @license
+   * Copyright Tyler Technologies, Inc.
+   * License: Apache-2.0
+   */
+
+lit-html/directive-helpers.js:
+  /**
+   * @license
+   * Copyright 2020 Google LLC
+   * SPDX-License-Identifier: BSD-3-Clause
+   */
+
+@tylertech/forge/esm/core/utils/a11y-utils.js:
+  /**
+   * @license
+   * Copyright Tyler Technologies, Inc.
+   * License: Apache-2.0
+   */
+  /**
+   * @license
+   * Copyright 2023 Google LLC
+   * SPDX-License-Identifier: Apache-2.0
+   *
+   * Adapted and influenced from [Material Web](https://github.com/material-components/material-web).
+   * The original source code can be found at: [GitHub](https://github.com/material-components/material-web/blob/main/internal/aria/aria.ts)
+   */

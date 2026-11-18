@@ -1,0 +1,581 @@
+<?php
+namespace PublishPress\Revisions;
+
+\defined('ABSPATH') || exit;
+
+class RevisionCreation {
+	var $revisionary;
+	var $options = [];
+
+	function __construct($args = []) {
+		// Support instantiation downstream from Revisionary constructor (before its return value sets global variable)
+		if (!empty($args) && is_array($args) && !empty($args['revisionary'])) {
+			$this->revisionary = $args['revisionary'];
+		}
+	}
+
+	// @todo: status change handler for draft => future-revision
+	function flt_future_revision_status_change($revision_status, $old_status, $revision_id) {
+		if ('future-revision' == $revision_status) {
+			require_once( dirname(__FILE__).'/admin/revision-action_rvy.php');
+			rvy_update_next_publish_date(['revision_id' => $revision_id]);
+		}
+
+		if ('pending-revision' == $revision_status) {
+			$revision = get_post($revision_id);
+			
+			do_action('revisionary_submit_revision', $revision);
+
+			/**
+			* Trigger after a revision creation.
+			*
+			* @param int $revision The revision object.
+			*/
+			do_action('revisionary_created_revision', $revision);
+		}
+	}
+
+	function flt_pending_revision_data( $data, $postarr ) {
+
+		if (rvy_is_revision_status($postarr['post_mime_type'])) {
+			if ($data['post_name'] != $postarr['post_name']) {
+				add_post_meta($revision_id, '_requested_slug', $data['post_name']);
+				$data['post_name'] = $postarr['post_name'];
+			}
+		}
+
+		return $data;	
+	}
+
+	static function fltInterruptPostMetaOperation($interrupt) {
+		return true;
+	}
+
+	function copyPost($post_id, $post_status, $args = [], $post_data = []) {
+		global $wpdb, $current_user;
+
+        // Enforce source access here, including direct API and force callers.
+        if (!rvy_can_access_copy_source($post_id)) {
+            return 0;
+        }
+
+        $published_post = get_post($post_id);
+
+		$set_post_properties = [       
+			'post_content',          
+			'post_content_filtered', 
+			'post_title',            
+			'post_excerpt',                   
+			'comment_status',        
+			'ping_status',           
+			'post_password',                            
+			'menu_order',                 
+		];
+
+		if ($is_revision = rvy_in_revision_workflow($post_id)) {
+			$set_post_properties []= 'comment_count';
+			$set_post_properties []= 'post_mime_type';
+		}
+
+		$data = [];
+
+		foreach($set_post_properties as $prop) {
+			$data[$prop] = $published_post->$prop;
+		}
+
+		$data['post_type'] = $published_post->post_type;
+		$data['post_parent'] = $published_post->post_parent;
+
+		if (!empty($args['time_gmt'])) {
+			$timestamp = $args['time_gmt'];
+			$data['post_date_gmt'] = gmdate( 'Y-m-d H:i:s', $timestamp);
+			$data['post_date'] = gmdate( 'Y-m-d H:i:s', $timestamp + (int) ( get_option( 'gmt_offset' ) * HOUR_IN_SECONDS ));
+		}
+
+		if (is_array($post_data)) {
+			$data = array_merge($data, $post_data);
+		}
+
+		if ($is_revision) {
+			$args['force_revision_copy'] = true;
+		}
+
+		$copy_id = $this->insert_post($data, $post_id, $post_status, $args);
+		if (is_wp_error($copy_id)) {
+            if (empty($args['suppress_redirect']) && !isset($args['redirect_url'])) { wp_die(esc_html($copy_id->get_error_message())); }
+            return $copy_id;
+        }
+
+		$post_copy = get_post($copy_id);
+
+		if (!$copy_id || !is_scalar($copy_id)) { // update_post_data() returns array or object on update abandon / failure
+			return;
+		}
+
+		$redirect_url = (isset($args['redirect_url'])) ? $args['redirect_url'] : rvy_admin_url("post.php?post=$copy_id&action=edit");
+
+		$redirect_url = add_query_arg('rvy_copy', 1, $redirect_url);
+
+		$url = apply_filters('revisionary_copy_post_redirect', $redirect_url, $copy_id);
+
+		if (!$url || !empty($args['suppress_redirect'])) {
+			return $copy_id;
+		}
+
+		wp_safe_redirect($url);
+		exit;
+	}
+
+	private function insert_post($data, $post_id, $post_status, $args) {
+		global $wpdb, $revisionary;
+
+		$data['post_status'] = apply_filters('revisionary_copy_post_status', $post_status, $post_id);
+
+		$base_post = get_post($post_id);
+		
+		if (!empty($base_post) && !empty($base_post->post_status) && ('revision' == $base_post->post_type)) {
+			$post_id = $base_post->post_parent;
+
+		} elseif (!empty($base_post) && rvy_in_revision_workflow($base_post) && empty($args['force_revision_copy'])) {
+			$post_id = rvy_post_id($base_post->ID);
+            if (!$post_id) {
+                return 0;
+            }
+		}
+
+		$enabled_fields = $revisionary->enabled_fields_copy;
+
+		$disabled_fields = array_fill_keys(
+			['ID', 'post_name', 'guid'], 
+			true
+		);
+
+		if (empty($args['force_revision_copy'])) {
+			$disabled_fields []= 'comment_count';
+		}
+
+		if (is_array($enabled_fields)) {
+			if (!empty($args['force_revision_copy'])) {
+				$enabled_fields ['comment_count'] = 1;
+				$enabled_fields ['post_mime_type'] = 1;
+			}
+			
+			$data = array_diff_key(
+				$data,
+				array_filter(
+					$enabled_fields, 
+					function($val) {
+						return is_null($val) || !$val;
+					}
+				),
+				$disabled_fields
+			);
+		}
+
+        // A copy created as a live post must not inherit revision identity.
+        if (in_array($data['post_status'], ['publish', 'private', 'future'], true)
+            && !empty($data['post_mime_type'])
+            && rvy_is_revision_status($data['post_mime_type'])
+        ) {
+            $data['post_mime_type'] = '';
+            $data['comment_count'] = 0;
+        }
+
+		$data['post_name'] = wp_unique_post_slug($base_post->post_name, $post_id, $post_status, $base_post->post_type, $base_post->post_parent);
+
+        $skip_meta_keys = is_array($enabled_fields) ? array_keys(array_filter($enabled_fields, static function ($value) { return !$value; })) : [];
+        $meta_check = revisionary_copy_postmeta($post_id, 0, ['skip_meta_keys' => $skip_meta_keys, 'validate_only' => true]);
+        if (is_wp_error($meta_check)) { return $meta_check; }
+
+		do_action( 'revisionary_pre_copy_post', $post_id, $data );
+
+		add_filter('wp_insert_post_empty_content', [$this, 'disregardEmptyContent']);
+
+		do_action('revisionary_pre_copy_post_insert', $post_id, $data);
+		try {
+			$copy_id = wp_insert_post(\wp_slash($data), true);
+		} finally {
+			remove_filter('wp_insert_post_empty_content', [$this, 'disregardEmptyContent']);
+			do_action('revisionary_post_copy_post_insert', $post_id, $copy_id ?? 0, $data);
+		}
+
+        // Insert filters may have made the copy a normal live post. Never write
+        // a base-post ID into its real comment count after that transition.
+		if (!is_wp_error($copy_id) && $copy_id && !empty($args['force_revision_copy'])
+            && rvy_in_revision_workflow($copy_id)
+        ) {
+			$update_data = ['comment_count' => rvy_post_id($post_id)];
+
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+			$wpdb->update($wpdb->posts, $update_data, ['ID' => $copy_id]);
+		}
+
+		if (is_wp_error($copy_id)) {
+			return new \WP_Error(esc_html__( 'Could not insert post into the database', 'revisionary'));
+		}
+
+		// Use the newly generated $post_ID.
+		$where = array( 'ID' => $copy_id );
+
+		$_args = ['skip_taxonomies' => []];
+
+		if (is_array($enabled_fields) && empty($enabled_fields['taxonomies'])) {
+			$_args['include_taxonomies'] = ['category', 'post_tag'];
+		}
+
+		if (is_array($enabled_fields) && empty($enabled_fields['category'])) {
+			$_args['skip_taxonomies'] []= 'category';
+		}
+
+		if (is_array($enabled_fields) && empty($enabled_fields['post_tag'])) {
+			$_args['skip_taxonomies'] []= 'post_tag';
+		}
+
+		// If term selections are not posted for revision, store current published terms
+		revisionary_copy_terms($post_id, $copy_id, $_args);
+
+
+        $meta_result = revisionary_copy_postmeta($post_id, $copy_id, compact('skip_meta_keys'));
+        if (is_wp_error($meta_result)) {
+            wp_delete_post($copy_id, true);
+            return $meta_result;
+        }
+
+		if ($post_id != $copy_id) {
+			rvy_update_post_meta($copy_id, '_rvy_source_post_id', $post_id);
+			// Editor integrations may initialize field metadata merely by opening the new duplicate.
+			// Do not turn those initialization writes into Past Revisions before the first post update.
+			update_post_meta($copy_id, '_rvy_duplicate_field_archive_pending', 1);
+		}
+	
+		// Set GUID.
+		if ( '' == get_post_field( 'guid', $copy_id ) ) {
+			// need to give revision a guid for 3rd party editor compat (post_ID is ID of revision)
+
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+			$wpdb->update( $wpdb->posts, array( 'guid' => get_permalink( $copy_id ) ), $where );
+		}
+	
+		do_action('revisionary_copy_post', $copy_id, $post_status);
+
+		return (int) $copy_id; // only return array in calling function should return
+	}
+
+	function disregardEmptyContent($maybe_empty) {
+		return false;
+	}
+
+	// Create a new revision, usually 'draft-revision' (Working Copy) or 'future-revision' (Scheduled Revision)
+
+	// If an autosave was stored for the current user prior to this creation, it will be retrieved in place of the main revision. 
+	function createRevision($post_id, $revision_status, $args = [], $revision_data = []) {
+        global $wpdb, $current_user;
+
+        // Check before reading content, reusing a revision, or copying metadata.
+        if (!rvy_can_access_copy_source($post_id, true)
+            || (!empty($args['meta_post_id']) && !rvy_can_access_copy_source($args['meta_post_id'], true))) {
+            return 0;
+        }
+
+		$is_revision = rvy_in_revision_workflow($post_id);
+
+		$main_post_id = $is_revision ? rvy_post_id($post_id) : $post_id;
+
+        $published_post = get_post($main_post_id);
+        if (rvy_builder_schema_blocked($published_post)) {
+            return new \WP_Error('builder_storage_schema', __('Page Builder integration requires Revisions Pro to be set to standard storage schema.', 'revisionary'));
+        }
+
+		if (rvy_get_option('create_revision_reuse_unsubmitted') && !$is_revision && !empty($args['reuse_unsubmitted']) && 'future-revision' !== $revision_status) {
+            // Keep each author's unfinished changes together; do not overwrite a saved draft.
+
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+            $existing_ids = $wpdb->get_col($wpdb->prepare(
+                "SELECT ID FROM $wpdb->posts WHERE comment_count = %d AND post_author = %d
+                 AND post_mime_type = 'draft-revision' AND post_status IN ('draft', 'draft-revision')
+                 AND post_type = %s ORDER BY post_modified_gmt DESC, ID DESC",
+                    $main_post_id, get_current_user_id(), get_post_type($main_post_id)
+            ));
+            foreach ($existing_ids as $existing_id) {
+                if (!current_user_can('edit_post', $existing_id)) {
+                    continue;
+                }
+                $url = isset($args['redirect_url']) ? $args['redirect_url'] : rvy_admin_url("post.php?post=$existing_id&action=edit");
+                $url = apply_filters('revisionary_create_revision_redirect', $url, (int) $existing_id);
+                if (!$url || !empty($args['suppress_redirect'])) {
+                    return (int) $existing_id;
+                }
+                wp_safe_redirect($url);
+                exit;
+            }
+
+        }
+
+
+		$set_post_properties = [       
+			'post_content',          
+			'post_content_filtered', 
+			'post_title',            
+			'post_excerpt',                   
+			'comment_status',        
+			'ping_status',           
+			'post_password',                            
+			'menu_order',                 
+		];
+
+		$data = [];
+
+		if (!$is_revision) {
+			if ($autosave_post = Utils::get_post_autosave($post_id, $current_user->ID)) {
+				if (strtotime($autosave_post->post_modified_gmt) > strtotime($published_post->post_modified_gmt)) {
+					$use_autosave = true;
+					$args['meta_post_id'] = $autosave_post->ID;
+				}
+			}
+		}
+
+		foreach($set_post_properties as $prop) {
+			$data[$prop] = (!empty($use_autosave) && !empty($autosave_post->$prop)) ? $autosave_post->$prop : $published_post->$prop;
+		}
+
+		$data['post_type'] = $published_post->post_type;
+		$data['post_parent'] = $published_post->post_parent;
+
+		if (!defined('REVISIONARY_LEGACY_REVISION_AUTHOR') && !empty($current_user) && !empty($current_user->ID)) {
+			$data['post_author'] = $current_user->ID;
+		}
+
+		if (!empty($args['time_gmt'])) {
+			$timestamp = $args['time_gmt'];
+			$data['post_date_gmt'] = gmdate( 'Y-m-d H:i:s', $timestamp);
+			$data['post_date'] = gmdate( 'Y-m-d H:i:s', $timestamp + (int) ( get_option( 'gmt_offset' ) * HOUR_IN_SECONDS ));
+		}
+
+		if (is_array($revision_data)) {
+			$data = array_merge($data, $revision_data);
+		}
+
+		$revision_id = $this->insert_revision($data, $main_post_id, $revision_status, $args);
+		if (is_wp_error($revision_id)) {
+            if (empty($args['suppress_redirect']) && !isset($args['redirect_url'])) { wp_die(esc_html($revision_id->get_error_message())); }
+            return $revision_id;
+        }
+        if (!$revision_id) { return $revision_id; }
+
+		$revision = get_post($revision_id);
+
+		if (!empty($use_autosave)) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+			$wpdb->delete($wpdb->posts, ['ID' => $autosave_post->ID]);
+		}
+
+		if ('future-revision' == $revision_status) {
+			require_once( dirname(__FILE__).'/admin/revision-action_rvy.php');
+			rvy_update_next_publish_date(['revision_id' => $revision_id]);
+
+			$revision_before = $published_post;
+			$revision_before->post_mime_type = 'new';
+
+			do_action('revisionary_scheduled', $published_post->ID, $revision, $revision_before);
+		}
+
+		if (('pending-revision' == $revision_status) && !defined('REVISIONARY_NO_INSERT_POST_ACTION')) {
+			$revision_before = $revision;
+			$revision_before->post_status = apply_filters('revisionary_post_revision_status', 'draft', 'draft-revision', $revision_id);
+			$revision_before->post_mime_type = 'draft-revision';
+			
+			do_action('wp_after_insert_post', $revision_id, $revision, true, $revision_before);
+		}
+
+		if (!$revision_id || !is_scalar($revision_id)) { // update_post_data() returns array or object on update abandon / failure
+			return;
+		}
+
+		$post = get_post($revision_id);
+
+		if (('pending-revision' == $revision_status) && !defined('REVISONARY_AUTO_SUBMIT_NO_NOTIFICATION')) {
+			require_once( dirname(REVISIONARY_FILE).'/revision-workflow_rvy.php' );
+			$rvy_workflow_ui = new \Rvy_Revision_Workflow_UI();
+
+			$notification_args = ['revision_id' => $revision_id, 'published_post' => $published_post, 'object_type' => $published_post->post_type];
+			$rvy_workflow_ui->do_notifications('pending-revision', 'pending-revision', (array) $published_post, $notification_args);
+		}
+
+		$redirect_url = (isset($args['redirect_url'])) ? $args['redirect_url'] : rvy_admin_url("post.php?post=$revision_id&action=edit");
+
+		$redirect_url = add_query_arg('rvy_new', 1, $redirect_url);
+
+		$url = apply_filters('revisionary_create_revision_redirect', $redirect_url, $revision_id);
+
+		if (!$url || !empty($args['suppress_redirect'])) {
+			return $revision_id;
+		}
+
+		wp_safe_redirect($url);
+		exit;
+	}
+
+    private function insert_revision($data, $main_post_id, $revision_status, $args = []) {
+		global $wpdb, $current_user;
+
+		$data['post_mime_type'] = $revision_status;
+
+		switch($revision_status) {
+			case 'draft-revision':
+				$data['post_status'] = 'draft';
+
+				$data['post_date'] = current_time( 'mysql' );
+				$data['post_date_gmt'] = current_time( 'mysql', 1 );
+				break;
+
+			case 'future-revision':
+				$data['post_status'] = 'pending';
+				break;
+
+			default:
+				$data['post_status'] = 'pending';
+		}
+
+		$data['post_status'] = apply_filters('revisionary_post_revision_status', $data['post_status'], $revision_status, $main_post_id);
+
+		$base_post = get_post($main_post_id);
+		
+		if (!empty($base_post) && !empty($base_post->post_status) && ('revision' == $base_post->post_type)) {
+			$main_post_id = $base_post->post_parent;
+
+		} elseif (!empty($base_post) && rvy_in_revision_workflow($base_post)) {
+			$main_post_id = rvy_post_id($base_post->ID);
+            if (!$main_post_id) {
+                return 0;
+            }
+		}
+
+		$data['comment_count'] = $main_post_id; 	// buffer this value in posts table for query efficiency (actual comment count stored for published post will not be overwritten)
+
+		$data['post_author'] = $current_user->ID;		// store current user as revision author (but will retain current post_author on restoration)
+
+		$data['post_modified'] = current_time( 'mysql' );
+		$data['post_modified_gmt'] = current_time( 'mysql', 1 );
+
+		if ( $future_date = ! empty($data['post_date']) && ( strtotime($data['post_date_gmt'] ) > agp_time_gmt() + 30 ) ) {  // in past versions, $future_date was also passed to get_revision_msg()
+			// round down to zero seconds
+			$data['post_date_gmt'] = gmdate( 'Y-m-d H:i:00', strtotime( $data['post_date_gmt'] ) );
+			$data['post_date'] = gmdate( 'Y-m-d H:i:00', strtotime( $data['post_date'] ) );
+		}
+
+		// @todo: confirm this is still needed
+		$data['guid'] = '';
+		$data['post_name'] = '';
+
+		do_action( 'revisionary_pre_insert_revision', $main_post_id, $data );
+
+        // Reject unsupported source fields before creating a partial revision.
+        $meta_post = !empty($args['meta_post_id']) ? get_post($args['meta_post_id']) : null;
+        $meta_source = $meta_post && !empty($meta_post->post_type)
+            && apply_filters('revisionary_use_autodraft_meta', true, $data) ? (int) $args['meta_post_id'] : $main_post_id;
+        $meta_check = revisionary_copy_postmeta($meta_source, 0, ['validate_only' => true]);
+        if (is_wp_error($meta_check)) { return $meta_check; }
+        if ($meta_source !== $main_post_id) {
+            $meta_check = revisionary_copy_postmeta($main_post_id, 0, [
+                'validate_only' => true,
+                // Autosave fields supersede these parent fields.
+                'skip_meta_keys' => (array) get_post_custom_keys($meta_source),
+            ]);
+            if (is_wp_error($meta_check)) { return $meta_check; }
+        }
+
+		$revision_id = wp_insert_post(\wp_slash($data), true);
+
+		if (is_wp_error($revision_id)) {
+			return new \WP_Error(esc_html__( 'Could not insert revision into the database', 'revisionary'));
+		}
+
+		$update_data = ('pending-revision' == $data['post_mime_type'])  // 
+		? ['comment_count' => $main_post_id, 'post_modified_gmt' => $data['post_modified_gmt'], 'post_modified' => $data['post_modified']]
+		: ['comment_count' => $main_post_id];
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$wpdb->update($wpdb->posts, $update_data, ['ID' => $revision_id]);
+
+		/**
+		 * Fired when a new revision is being inserted into the database.
+		 *
+		 * @param int   $revision_id  The ID of the inserted revision.
+		 * @param int   $main_post_id The ID of the published post for this revision.
+		 * @param array $data         The post data used to create this revision.
+		 */
+		do_action( 'revisionary_new_revision_inserting', $revision_id, $main_post_id, $data );
+
+		if (!defined('REVISONARY_CREATE_REVISION_NO_COMMENT_COUNT_UPDATE')) {
+			// Hack WP into updating the comment count to store the main post ID in the comment_count field.
+			add_filter(
+				'pre_wp_update_comment_count_now',
+				function( $new, $old, $post_id ) use ( $revision_id, $main_post_id ) {
+					if ( (int) $revision_id === (int) $post_id ) {
+						return $main_post_id;
+					}
+
+					return $new;
+				},
+				10,
+				3
+			);
+
+			// Update the comment count.
+			wp_update_comment_count_now( $revision_id );
+		}
+
+		// Use the newly generated $post_ID.
+		$where = array( 'ID' => $revision_id );
+
+		// make sure autosave still exists
+		if (!empty($args['meta_post_id'])) {
+			$post = get_post($args['meta_post_id']);
+
+			if (empty($post) || empty($post->post_type)) {
+				unset($args['meta_post_id']);
+			}
+		}
+
+		if ($meta_source !== $main_post_id) {
+			revisionary_copy_terms($meta_source, $revision_id);
+			$meta_result = revisionary_copy_postmeta($meta_source, $revision_id);
+
+			// For taxonomies and meta keys not stored for the autosave, use published copies
+			revisionary_copy_terms($main_post_id, $revision_id, ['empty_target_only' => true]);
+			if (!is_wp_error($meta_result)) {
+                $meta_result = revisionary_copy_postmeta($main_post_id, $revision_id, ['empty_target_only' => true]);
+            }
+		} else {
+			// If term selections are not posted for revision, store current published terms
+			revisionary_copy_terms($main_post_id, $revision_id);
+			$meta_result = revisionary_copy_postmeta($main_post_id, $revision_id);
+		}
+
+        if (is_wp_error($meta_result)) {
+            wp_delete_post($revision_id, true);
+            return $meta_result;
+        }
+
+		if ($main_post_id != $revision_id) {
+			rvy_update_post_meta($revision_id, '_rvy_base_post_id', $main_post_id);
+		}
+
+		if (!defined('REVISIONARY_LIMIT_IGNORE_UNSUBMITTED')) {
+			rvy_update_post_meta($main_post_id, '_rvy_has_revisions', true);
+		}
+	
+		// Set GUID.  @todo: still needed?
+		if ( '' == get_post_field( 'guid', $revision_id ) ) {
+			// need to give revision a guid for 3rd party editor compat (post_ID is ID of revision)
+
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+			$wpdb->update( $wpdb->posts, array( 'guid' => get_permalink( $revision_id ) ), $where );
+		}
+	
+		$data['ID'] = $revision_id;
+		do_action('revisionary_new_revision', $revision_id, $revision_status);
+
+		return (int) $revision_id; // only return array in calling function should return
+	}
+}
