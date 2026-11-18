@@ -8,6 +8,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
         with: { php-version: '8.4', tools: composer }
+      - name: Pantheon config is present
+        run: test -f wp-config-pantheon.php || { echo "::error::wp-config-pantheon.php is missing; Pantheon sites will fail with a database connection error."; exit 1; }
       - run: composer install --no-interaction --no-progress
       # Composer-managed plugins (shared cmscoe-* packages included) must match composer.lock exactly:
       # a fresh install overwrites them, so any local edit or stray file shows up here as a diff.
